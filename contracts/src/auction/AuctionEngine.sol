@@ -230,35 +230,41 @@ contract AuctionEngine is ReentrancyGuard, Pausable {
     // =========================================================================
 
     /// @notice Internal settlement logic — called atomically after clearing.
-    /// @dev Re-checks compliance for each filled bidder before transferring.
-    ///      Ordering: collect payment first, then deliver asset (reduces re-entrancy surface).
+    /// @dev DvP settlement: pull both legs into the engine (collect phase), then
+    ///      deliver both legs out (distribute phase) within the same transaction.
+    ///      Bidders whose KYC was revoked by settlement time are excluded from the
+    ///      eligible bid set BEFORE matching, so the matched buy/sell totals always
+    ///      balance and settlement can never leave a half-settled counterparty.
     function _settle(uint256 roundId, uint256 clearingPrice, ClearingLib.Bid[] memory allBids)
         internal
     {
         AuctionRound storage round = rounds[roundId];
-        ClearingLib.Bid[] memory filledBids = ClearingLib.matchBids(allBids, clearingPrice);
+
+        // Reduce to the eligible bid set (drop revoked bidders), then match for a
+        // balanced fill where total buy quantity == total sell quantity.
+        ClearingLib.Bid[] memory filledBids = _matchEligibleBids(round, allBids, clearingPrice);
 
         IERC20 bondToken = IERC20(round.bondToken);
         IERC20 settlementToken = IERC20(round.settlementToken);
 
+        // Collect phase: pull both legs into the engine.
         for (uint256 i = 0; i < filledBids.length; i++) {
             ClearingLib.Bid memory bid = filledBids[i];
-
-            // Re-check compliance at settlement (KYC may have been revoked mid-round)
-            if (!complianceGate.isEligible(bid.bidder, round.bondToken)) {
-                // Skip this bidder — do not revert the whole settlement
-                continue;
-            }
-
             uint256 settlementAmount = bid.quantity * clearingPrice / 1e18;
-
             if (bid.isBuy) {
-                // Buyer: sends USDC, receives bond tokens
                 settlementToken.safeTransferFrom(bid.bidder, address(this), settlementAmount);
+            } else {
+                bondToken.safeTransferFrom(bid.bidder, address(this), bid.quantity);
+            }
+        }
+
+        // Distribute phase: deliver both legs out of the engine.
+        for (uint256 i = 0; i < filledBids.length; i++) {
+            ClearingLib.Bid memory bid = filledBids[i];
+            uint256 settlementAmount = bid.quantity * clearingPrice / 1e18;
+            if (bid.isBuy) {
                 bondToken.safeTransfer(bid.bidder, bid.quantity);
             } else {
-                // Seller: sends bond tokens, receives USDC
-                bondToken.safeTransferFrom(bid.bidder, address(this), bid.quantity);
                 settlementToken.safeTransfer(bid.bidder, settlementAmount);
             }
 
@@ -266,6 +272,32 @@ contract AuctionEngine is ReentrancyGuard, Pausable {
         }
 
         round.phase = Phase.Closed;
+    }
+
+    /// @dev Filters `allBids` to only KYC-eligible bidders, then matches the subset.
+    ///      Matching on the eligible subset guarantees the buy and sell fill totals are
+    ///      equal, so the collect/distribute phases always settle to zero net balance.
+    function _matchEligibleBids(
+        AuctionRound storage round,
+        ClearingLib.Bid[] memory allBids,
+        uint256 clearingPrice
+    ) internal view returns (ClearingLib.Bid[] memory filledBids) {
+        uint256 eligibleCount = 0;
+        for (uint256 i = 0; i < allBids.length; i++) {
+            if (complianceGate.isEligible(allBids[i].bidder, round.bondToken)) {
+                eligibleCount++;
+            }
+        }
+
+        ClearingLib.Bid[] memory eligibleBids = new ClearingLib.Bid[](eligibleCount);
+        uint256 idx = 0;
+        for (uint256 i = 0; i < allBids.length; i++) {
+            if (complianceGate.isEligible(allBids[i].bidder, round.bondToken)) {
+                eligibleBids[idx++] = allBids[i];
+            }
+        }
+
+        filledBids = ClearingLib.matchBids(eligibleBids, clearingPrice);
     }
 
     // =========================================================================
