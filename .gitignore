@@ -29,3 +29,5 @@ Thumbs.db
 
 # Test snapshots (optional, enable if using gas snapshots)
 # .gas-snapshot
+
+PLAN.md

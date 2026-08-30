@@ -2,7 +2,7 @@
 pragma solidity ^0.8.26;
 
 import {Test, console} from "forge-std/Test.sol";
-import {ClearingLib} from "../contracts/auction/ClearingLib.sol";
+import {ClearingLib} from "auction/ClearingLib.sol";
 
 /// @title ClearingLib Unit Tests
 /// @notice Exhaustive edge-case coverage per the spec §4.3 test table.
