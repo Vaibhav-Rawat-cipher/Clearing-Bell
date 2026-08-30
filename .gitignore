@@ -1,0 +1,31 @@
+# Environment
+.env
+.env.local
+.env.*.local
+
+# Foundry build artifacts
+out/
+cache/
+broadcast/
+
+# Dependencies
+lib/
+node_modules/
+
+# Frontend build
+frontend/.next/
+frontend/dist/
+frontend/build/
+
+# IDE
+.vscode/
+.idea/
+*.suo
+*.user
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Test snapshots (optional, enable if using gas snapshots)
+# .gas-snapshot
