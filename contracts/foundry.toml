@@ -13,6 +13,12 @@ remappings = [
     "@openzeppelin/contracts/=lib/openzeppelin-contracts/contracts/",
     "forge-std/=lib/forge-std/src/",
     "auction/=src/auction/",
+    "hook/=src/hooks/",
+    # Uniswap v4 — use the OZ hooks' bundled v4-core (has PoolOperation.sol required by BaseHook)
+    "@uniswap/v4-core/=lib/uniswap-hooks/lib/v4-core/",
+    "@openzeppelin/uniswap-hooks/=lib/uniswap-hooks/",
+    # HookMiner lives in v4-periphery bundled under OZ hooks
+    "v4-periphery/=lib/uniswap-hooks/lib/v4-periphery/src/",
 ]
 
 [profile.default.fuzz]

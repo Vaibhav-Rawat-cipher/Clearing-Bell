@@ -55,6 +55,7 @@ contract AuctionEngine is ReentrancyGuard, Pausable {
     uint256 public nextRoundId;
     mapping(uint256 => AuctionRound) public rounds;
     mapping(uint256 => ClearingLib.Bid[]) internal _roundBids;
+    mapping(address => bool) public authorizedBidRelayers;
 
     // =========================================================================
     // Events
@@ -83,6 +84,7 @@ contract AuctionEngine is ReentrancyGuard, Pausable {
         bool isBuy
     );
     event RoundClosedWithNoCrossing(uint256 indexed roundId);
+    event BidRelayerUpdated(address indexed relayer, bool authorized);
 
     // =========================================================================
     // Errors
@@ -97,6 +99,7 @@ contract AuctionEngine is ReentrancyGuard, Pausable {
     error InvalidBidPrice();
     error InvalidBidQuantity();
     error ZeroAddress();
+    error NotAuthorizedBidRelayer();
 
     // =========================================================================
     // Modifiers
@@ -104,6 +107,11 @@ contract AuctionEngine is ReentrancyGuard, Pausable {
 
     modifier onlyIssuer() {
         if (msg.sender != issuer) revert NotIssuer();
+        _;
+    }
+
+    modifier onlyAuthorizedRelayer() {
+        if (!authorizedBidRelayers[msg.sender]) revert NotAuthorizedBidRelayer();
         _;
     }
 
@@ -164,6 +172,37 @@ contract AuctionEngine is ReentrancyGuard, Pausable {
         external
         whenNotPaused
     {
+        _submitBid(msg.sender, roundId, price, quantity, isBuy);
+    }
+
+    /// @notice Relay a bid on behalf of `bidder` from an authorized caller (the clearing hook).
+    /// @dev Enables the Uniswap v4 hook to route a user's swap into the auction as that user's
+    ///      bid. The real bidder (the swap sender) is KYC-checked at bid time AND at settlement.
+    /// @param bidder    The swap sender / actual bidder on whose behalf the bid is placed.
+    /// @param roundId   The auction round to bid into.
+    /// @param price     Limit price in settlement token units per bond token.
+    /// @param quantity  Number of bond tokens to buy or sell.
+    /// @param isBuy     True = buy order, false = sell order.
+    function submitBidFor(address bidder, uint256 roundId, uint256 price, uint256 quantity, bool isBuy)
+        external
+        onlyAuthorizedRelayer
+        whenNotPaused
+    {
+        _submitBid(bidder, roundId, price, quantity, isBuy);
+    }
+
+    /// @notice Grant or revoke privileged bid-relay rights (e.g. to the clearing hook).
+    /// @param relayer The contract allowed to relay bids on behalf of traders.
+    /// @param authorized True to allow, false to revoke.
+    function setAuthorizedBidRelayer(address relayer, bool authorized) external onlyIssuer {
+        if (relayer == address(0)) revert ZeroAddress();
+        authorizedBidRelayers[relayer] = authorized;
+        emit BidRelayerUpdated(relayer, authorized);
+    }
+
+    function _submitBid(address bidder, uint256 roundId, uint256 price, uint256 quantity, bool isBuy)
+        internal
+    {
         AuctionRound storage round = rounds[roundId];
 
         if (round.phase != Phase.Open) revert RoundNotOpen(roundId);
@@ -172,14 +211,14 @@ contract AuctionEngine is ReentrancyGuard, Pausable {
         if (quantity == 0) revert InvalidBidQuantity();
 
         // Compliance check at bid submission time
-        if (!complianceGate.isEligible(msg.sender, round.bondToken)) {
-            revert BidderNotEligible(msg.sender);
+        if (!complianceGate.isEligible(bidder, round.bondToken)) {
+            revert BidderNotEligible(bidder);
         }
 
         uint256 bidIndex = round.bidCount++;
         _roundBids[roundId].push(
             ClearingLib.Bid({
-                bidder: msg.sender,
+                bidder: bidder,
                 price: price,
                 quantity: quantity,
                 isBuy: isBuy,
@@ -187,7 +226,7 @@ contract AuctionEngine is ReentrancyGuard, Pausable {
             })
         );
 
-        emit BidSubmitted(roundId, msg.sender, price, quantity, isBuy, bidIndex);
+        emit BidSubmitted(roundId, bidder, price, quantity, isBuy, bidIndex);
     }
 
     // =========================================================================
