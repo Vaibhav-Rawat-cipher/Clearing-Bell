@@ -10,31 +10,31 @@ Clearing Bell is a compliance-gated batch-auction secondary market for tokenized
 ┌──────────────────────────────────────────────────────────────────────┐
 │                        Hedera Testnet                                │
 │                                                                      │
-│  ┌──────────────┐     ┌─────────────────┐     ┌─────────────────┐   │
-│  │   Hedera     │     │   Uniswap v4    │     │   Frontend      │   │
-│  │     ATS      │     │   PoolManager   │     │   (Next.js)     │   │
-│  │              │     │                 │     │                 │   │
-│  │  Bond Token  │     │  ┌───────────┐  │     │  /issuer        │   │
-│  │  (ERC-3643)  │     │  │ Clearing  │  │     │  /bidder        │   │
-│  │              │     │  │ BellHook  │  │     │  /auctions/[id] │   │
-│  │  Identity    │◄────┼──│           │  │     │                 │   │
-│  │  Registry    │     │  │beforeSwap │  │     └────────┬────────┘   │
-│  │  (KYC store) │     │  └─────┬─────┘  │              │            │
-│  └──────────────┘     │        │        │              │            │
-│         ▲             └────────┼────────┘     JSON-RPC │            │
-│         │                      │                       │            │
-│  ┌──────┴──────┐     ┌─────────▼──────────────────────▼──────────┐ │
+│  ┌──────────────┐     ┌─────────────────┐     ┌─────────────────┐    │
+│  │   Hedera     │     │   Uniswap v4    │     │   Frontend      │    │
+│  │     ATS      │     │   PoolManager   │     │   Frontend      │    │
+│  │              │     │                 │     │                 │    │
+│  │  Bond Token  │     │  ┌───────────┐  │     │  /issuer        │    │
+│  │  (ERC-3643)  │     │  │ Clearing  │  │     │  /bidder        │    │
+│  │              │     │  │ BellHook  │  │     │  /auctions/[id] │    │
+│  │  Identity    │◄────┼──│           │  │     │                 │    │
+│  │  Registry    │     │  │beforeSwap │  │     └────────┬────────┘    │
+│  │  (KYC store) │     │  └─────┬─────┘  │              │             │
+│  └──────────────┘     │        │        │              │             │
+│         ▲             └────────┼────────┘     JSON-RPC │             │
+│         │                      │                       │             │
+│  ┌──────┴──────┐     ┌─────────▼──────────────────────▼──────────┐   │
 │  │ Compliance  │     │              AuctionEngine                  │ │
 │  │    Gate     │◄────│                                             │ │
 │  │             │     │  openRound() → submitBid() → closeAndClear()│ │
 │  │ isEligible()│     │                                             │ │
-│  └─────────────┘     │  ┌──────────────────────────────────────┐  │ │
-│                      │  │             ClearingLib               │  │ │
-│                      │  │  (pure library — no state)            │  │ │
-│                      │  │                                        │  │ │
-│                      │  │  computeClearingPrice(bids[])          │  │ │
-│                      │  │  matchBids(bids[], clearingPrice)      │  │ │
-│                      │  └──────────────────────────────────────┘  │ │
+│  └─────────────┘     │  ┌──────────────────────────────────────┐   │ │
+│                      │  │             ClearingLib              │   │ │
+│                      │  │  (pure library — no state)           │   │ │
+│                      │  │                                      │   │ │
+│                      │  │  computeClearingPrice(bids[])        |   │ │
+│                      │  │  matchBids(bids[], clearingPrice)    │   │ │
+│                      │  └──────────────────────────────────────┘   │ │
 │                      └─────────────────────────────────────────────┘ │
 └──────────────────────────────────────────────────────────────────────┘
 ```

@@ -17,8 +17,8 @@ remappings = [
     # Uniswap v4 — use the OZ hooks' bundled v4-core (has PoolOperation.sol required by BaseHook)
     "@uniswap/v4-core/=lib/uniswap-hooks/lib/v4-core/",
     "@openzeppelin/uniswap-hooks/=lib/uniswap-hooks/",
-    # HookMiner lives in v4-periphery bundled under OZ hooks
-    "v4-periphery/=lib/uniswap-hooks/lib/v4-periphery/src/",
+    # HookMiner — inlined to avoid v4-periphery submodule pull
+    "v4-periphery/utils/HookMiner.sol=test/mocks/HookMiner.sol",
 ]
 
 [profile.default.fuzz]
