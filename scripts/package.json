@@ -2,25 +2,26 @@
   "name": "clearing-bell-scripts",
   "version": "1.0.0",
   "description": "Hedera ATS deployment and testnet seeding scripts for Clearing Bell",
-  "type": "module",
   "scripts": {
-    "deploy:bond":    "tsx scripts/deploy-bond.ts",
-    "deploy:auction": "tsx scripts/deploy-auction.ts",
-    "deploy:hook":    "tsx scripts/deploy-hook.ts",
-    "seed":           "tsx scripts/seed-testnet.ts",
-    "verify":         "tsx scripts/verify-deployment.ts",
-    "round:open":     "tsx scripts/open-round.ts",
-    "round:close":    "tsx scripts/close-round.ts"
+    "deploy:bond": "ts-node deploy-bond.ts",
+    "deploy:auction": "ts-node deploy-auction.ts",
+    "deploy:hook": "ts-node deploy-hook.ts",
+    "seed": "ts-node seed-testnet.ts",
+    "verify": "ts-node verify-deployment.ts",
+    "round:open": "ts-node open-round.ts",
+    "round:close": "ts-node close-round.ts"
   },
   "dependencies": {
-    "@hashgraph/asset-tokenization-sdk": "^0.1.0",
+    "@hashgraph/asset-tokenization-sdk": "^8.0.0",
+    "@hashgraph/hedera-custodians-integration": "^1.4.1",
     "@hashgraph/sdk": "^2.51.0",
-    "viem": "^2.21.0",
-    "dotenv": "^16.4.5"
+    "dotenv": "^16.4.5",
+    "viem": "^2.21.0"
   },
   "devDependencies": {
+    "@types/node": "^22.7.5",
+    "ts-node": "^10.9.2",
     "tsx": "^4.19.2",
-    "typescript": "^5.6.3",
-    "@types/node": "^22.7.5"
+    "typescript": "^5.6.3"
   }
 }
