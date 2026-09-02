@@ -82,7 +82,9 @@ const USD_BYTES3: `0x${string}` = toHex("USD", { size: 3 });
 const NOMINAL_VALUE          = 100n;             // 1.00 USD
 const NOMINAL_VALUE_DECIMALS = 2;
 const MAX_SUPPLY             = 1_000_000n * 10n ** 6n; // 1M tokens @ 6 decimals
-const STARTING_DATE          = BigInt(Math.floor(Date.now() / 1000));
+// startingDate MUST be strictly in the future (WrongTimestamp error if <= block.timestamp)
+// Set 7 days ahead for a safe buffer
+const STARTING_DATE          = BigInt(Math.floor(Date.now() / 1000) + 7 * 24 * 3600);
 const MATURITY_DATE          = 1861862400n;      // 2028-12-31 UTC
 
 // ─── Factory ABI — v7.0.0 SecurityData field order ───────────────────────────
@@ -290,7 +292,11 @@ async function main() {
         proceedRecipientsData: [],
       },
       {
-        regulationType:    0,
+        // Valid combos per CheckRegulations.typeAndSubtype():
+        //   REG_S (1) + NONE (0)   ← only valid REG_S combination
+        //   REG_D (2) + 506_B (1)  or REG_D (2) + 506_C (2)
+        // (0,0), (1,1) are all forbidden — confirmed by on-chain revert errors
+        regulationType:    1,
         regulationSubType: 0,
         additionalSecurityData: {
           countriesControlListType: false,
