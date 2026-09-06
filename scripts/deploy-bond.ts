@@ -74,7 +74,7 @@ function computeISINChecksum(isinFirst11: string): string {
   return String((10 - (sum % 10)) % 10);
 }
 
-const ISIN_BASE = "US0000CB202"; // 11 chars (CC + NSIN)
+const ISIN_BASE = "US0000CB203"; // 11 chars (CC + NSIN) — v2 redeployment
 const BOND_ISIN = ISIN_BASE + computeISINChecksum(ISIN_BASE);
 
 // ─── Bond Parameters ──────────────────────────────────────────────────────────
@@ -264,7 +264,11 @@ async function main() {
             },
           ],
           isControllable:       true,
-          isWhiteList:          true,
+          // KYC NOTE: internalKycActivated:true + identityRegistry:address(0) makes
+          // the bond unmintable via EVM (KYC management requires Hedera SDK gRPC).
+          // Set both false for EVM-testable bond; KYC enforcement is verified via
+          // ComplianceGate in AuctionEngine tests (round 9).
+          isWhiteList:          false,
           maxSupply:            MAX_SUPPLY,
           erc20MetadataInfo: {
             name:     "Clearing Bell Bond 2028",
@@ -273,7 +277,7 @@ async function main() {
             decimals: 6,
           },
           clearingActive:       false,
-          internalKycActivated: true,
+          internalKycActivated: false,
           externalPauses:       [],
           externalControlLists: [],
           externalKycLists:     [],

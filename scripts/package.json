@@ -12,8 +12,8 @@
     "round:close": "ts-node close-round.ts"
   },
   "dependencies": {
-    "@hashgraph/asset-tokenization-sdk": "^8.0.0",
-    "@hashgraph/hedera-custodians-integration": "^1.4.1",
+    "@hashgraph/asset-tokenization-sdk": "^1.13.0",
+    "@hashgraph/hedera-custodians-integration": "^1.2.3",
     "@hashgraph/sdk": "^2.51.0",
     "dotenv": "^16.4.5",
     "viem": "^2.21.0"
