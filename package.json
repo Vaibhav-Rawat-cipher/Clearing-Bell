@@ -1,0 +1,17 @@
+{
+  "name": "clearing-bell",
+  "version": "1.0.0",
+  "private": true,
+  "scripts": {
+    "setup": "git submodule update --init --recursive && npm --prefix frontend ci",
+    "local": "node scripts/local-dev.mjs",
+    "local:fresh": "node scripts/local-dev.mjs --reseed",
+    "dev": "npm --prefix frontend run dev",
+    "dev:local": "npm run local && npm run dev",
+    "build": "npm --prefix frontend run build",
+    "lint": "npm --prefix frontend run lint",
+    "test:contracts": "forge test --root contracts",
+    "test:frontend": "npm --prefix frontend test",
+    "check": "npm run test:contracts && npm run test:frontend && npm run lint && npm run build"
+  }
+}

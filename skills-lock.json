@@ -1,0 +1,29 @@
+{
+  "version": 1,
+  "skills": {
+    "solidity": {
+      "source": "cyfrin/solskill",
+      "sourceType": "github",
+      "skillPath": "skills/solidity/SKILL.md",
+      "computedHash": "9856cfe5e06a64ff2ba4e4d2001c889e2510f7a1a5ce2df792c001a1940e145f"
+    },
+    "uniswap-v4-hooks": {
+      "source": "igoryuzo/uniswapv4-hooks-skill",
+      "sourceType": "github",
+      "skillPath": "SKILL.md",
+      "computedHash": "333efad0c72bef27eba3729a4f00269215360e52358990150f5233521ea1566c"
+    },
+    "v4-hook-generator": {
+      "source": "uniswap/uniswap-ai",
+      "sourceType": "github",
+      "skillPath": "packages/plugins/uniswap-hooks/skills/v4-hook-generator/SKILL.md",
+      "computedHash": "6796284522afe7cb8e8e2fa771a5a5dc0611822da8026361df718ca1d8f3ea09"
+    },
+    "v4-security-foundations": {
+      "source": "uniswap/uniswap-ai",
+      "sourceType": "github",
+      "skillPath": "packages/plugins/uniswap-hooks/skills/v4-security-foundations/SKILL.md",
+      "computedHash": "f4d5741e07fcb5e0efabb7700a44e8102b646645b3da2583b823acc9538acf61"
+    }
+  }
+}
