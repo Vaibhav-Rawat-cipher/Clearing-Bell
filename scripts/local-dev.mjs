@@ -15,7 +15,7 @@ let viem;
 try { viem = require('viem'); } catch {
   throw new Error('Install frontend dependencies first: npm --prefix frontend install');
 }
-const { createPublicClient, createWalletClient, defineChain, http, parseUnits, maxUint256 } = viem;
+const { createPublicClient, createWalletClient, defineChain, http, parseUnits, maxUint256, getCreate2Address, encodeAbiParameters, parseAbiParameters, toHex, pad } = viem;
 const rpcUrl = 'http://127.0.0.1:8545';
 const chain = defineChain({
   id: 31337, name: 'Clearing Bell Local',
@@ -86,6 +86,9 @@ async function main() {
   const gateArtifact = await artifact('ComplianceGate.sol', 'ComplianceGate');
   const tokenArtifact = await artifact('MockERC20.sol', 'MockERC20');
   const registryArtifact = await artifact('MockIdentityRegistry.sol', 'MockIdentityRegistry');
+  const poolManagerArtifact = await artifact('PoolManager.sol', 'PoolManager');
+  const hookDeployerArtifact = await artifact('HookDeployer.sol', 'HookDeployer');
+  const hookArtifact = await artifact('ClearingBellHook.sol', 'ClearingBellHook');
 
   async function receipt(hash) {
     const result = await client.waitForTransactionReceipt({ hash });
@@ -108,12 +111,49 @@ async function main() {
   const identityRegistry = await deploy(registryArtifact);
   const complianceGate = await deploy(gateArtifact);
   const auctionEngine = await deploy(engineArtifact, [complianceGate, issuer]);
+  const poolManager = await deploy(poolManagerArtifact, [issuer]);
+  const hookDeployer = await deploy(hookDeployerArtifact);
+
+  console.log('Mining CREATE2 salt for ClearingBellHook...');
+  const initCodeHash = await client.readContract({
+    address: hookDeployer,
+    abi: hookDeployerArtifact.abi,
+    functionName: 'getInitCodeHash',
+    args: [poolManager, auctionEngine]
+  });
+
+  let saltNum = 0n;
+  let validSalt;
+  let hookExpectedAddress;
+  while (true) {
+    const salt = pad(toHex(saltNum), { size: 32 });
+    const address = getCreate2Address({ bytecodeHash: initCodeHash, from: hookDeployer, salt });
+    if ((BigInt(address) & 0x3FFFn) === 0xC0n) {
+      validSalt = salt;
+      hookExpectedAddress = address;
+      break;
+    }
+    saltNum++;
+  }
+  
+  await write(issuer, hookDeployer, hookDeployerArtifact, 'deployHook', [poolManager, auctionEngine, validSalt]);
+  const clearingBellHook = hookExpectedAddress;
+
+  await write(issuer, complianceGate, gateArtifact, 'setAuctionEngine', [auctionEngine]);
+  await write(issuer, auctionEngine, engineArtifact, 'setAuthorizedBidRelayer', [clearingBellHook, true]);
+  await write(issuer, auctionEngine, engineArtifact, 'registerBondIssuer', [bondToken, issuer]);
   await write(issuer, complianceGate, gateArtifact, 'registerRegistry', [bondToken, identityRegistry]);
   for (const account of [issuer, investor, seller, maker]) {
     await write(issuer, identityRegistry, registryArtifact, 'grant', [account]);
     await write(issuer, settlementToken, tokenArtifact, 'mint', [account, parseUnits('250000', 6)]);
     await write(issuer, bondToken, tokenArtifact, 'mint', [account, parseUnits('1000', 18)]);
   }
+
+  console.log('Initializing Uniswap V4 Pool...');
+  const [currency0, currency1] = [bondToken, settlementToken].sort((a, b) => a.toLowerCase().localeCompare(b.toLowerCase()));
+  const poolKey = { currency0, currency1, fee: 3000, tickSpacing: 60, hooks: clearingBellHook };
+  const sqrtPriceX96 = 79228162514264337593543950336n; // 1:1 price
+  await write(issuer, poolManager, poolManagerArtifact, 'initialize', [poolKey, sqrtPriceX96]);
   // Historical buyer and liquidity providers approve settlement. The primary
   // investor's allowances are reset afterward so the UI can exercise approvals.
   for (const account of [investor, seller, maker]) {
@@ -133,7 +173,7 @@ async function main() {
 
   const manifest = {
     version: 1, network: 'local', chainId: 31337, rpcUrl, deploymentBlock,
-    contracts: { auctionEngine, complianceGate, identityRegistry, bondToken, settlementToken },
+    contracts: { auctionEngine, complianceGate, identityRegistry, bondToken, settlementToken, poolManager, clearingBellHook },
     bond: { name: 'Clearing Bell Bond 2028', symbol: 'CBB28', decimals: 18, couponBps: 550, maturity: '2028-12-31' },
     settlement: { symbol: 'USDC', decimals: 6 }, roundIds: [1, 2],
     accounts: [
@@ -146,7 +186,7 @@ async function main() {
   };
   await writeFile(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`);
   await copyFile(manifestPath, publicPath);
-  for (const [name, compiled] of Object.entries({ AuctionEngine: engineArtifact, ComplianceGate: gateArtifact, ERC20: tokenArtifact, IdentityRegistry: registryArtifact })) {
+  for (const [name, compiled] of Object.entries({ AuctionEngine: engineArtifact, ComplianceGate: gateArtifact, ERC20: tokenArtifact, IdentityRegistry: registryArtifact, PoolManager: poolManagerArtifact, ClearingBellHook: hookArtifact })) {
     await writeFile(join(localDir, `${name}.abi.json`), `${JSON.stringify(compiled.abi, null, 2)}\n`);
   }
   const historicalRound = await client.readContract({ address: auctionEngine, abi: engineArtifact.abi, functionName: 'rounds', args: [1n] });

@@ -147,6 +147,7 @@ contract HookTestSetup is Script {
         registry.register(deployer);
 
         // --- 5. Wire registry into REAL ComplianceGate ---
+        engine.registerBondIssuer(address(bond), deployer);
         gate.registerRegistry(address(bond), address(registry));
 
         // --- 6. Seed tokens ---

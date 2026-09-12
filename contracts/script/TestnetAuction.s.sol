@@ -106,6 +106,7 @@ contract TestnetAuctionSetup is Script {
 
         // --- 3. Register mock registry in the REAL ComplianceGate ---
         //        (deployer is ComplianceGate owner — confirmed on-chain)
+        engine.registerBondIssuer(address(bond), deployer);
         gate.registerRegistry(address(bond), address(registry));
 
         // --- 4. Seed mock bond to Bob (seller) ---

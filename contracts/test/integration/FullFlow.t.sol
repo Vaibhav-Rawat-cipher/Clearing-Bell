@@ -77,17 +77,19 @@ contract FullFlowTest is Test {
         // 2. ComplianceGate wired to identity registry
         registry = new MockIdentityRegistry();
         gate = new ComplianceGate();
-        gate.registerRegistry(address(bond), address(registry));
 
         // 3. MockPoolManager (access-control surface for BaseHook)
         poolManager = new MockPoolManager();
 
         // 4. AuctionEngine
         engine = new AuctionEngine(address(gate), ISSUER);
+        gate.setAuctionEngine(address(engine));
 
         // Register ISSUER as the bond issuer (Option C multi-issuer).
         vm.prank(ISSUER);
         engine.registerBondIssuer(address(bond), ISSUER);
+        vm.prank(ISSUER);
+        gate.registerRegistry(address(bond), address(registry));
 
         // 5. KYC: Alice, Bob, Carol — NOT Mallory
         registry.grant(ISSUER);

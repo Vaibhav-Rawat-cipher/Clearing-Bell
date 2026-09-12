@@ -91,6 +91,7 @@ contract ComplianceTestSetup is Script {
         // Charlie NOT registered -- complianceGate.isEligible(charlie, bond) will return false
 
         // --- 3. Wire PARTIAL registry into the REAL ComplianceGate ---
+        engine.registerBondIssuer(address(bond), deployer);
         gate.registerRegistry(address(bond), address(registry));
 
         // --- 4. Seed tokens ---

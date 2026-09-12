@@ -56,13 +56,15 @@ contract ClearingBellHookTest is Test {
 
         registry = new MockIdentityRegistry();
         gate = new ComplianceGate();
-        gate.registerRegistry(address(bond), address(registry));
 
         engine = new AuctionEngine(address(gate), ISSUER);
+        gate.setAuctionEngine(address(engine));
 
         // Register ISSUER as the bond issuer (Option C multi-issuer).
         vm.prank(ISSUER);
         engine.registerBondIssuer(address(bond), ISSUER);
+        vm.prank(ISSUER);
+        gate.registerRegistry(address(bond), address(registry));
 
         // KYC everyone.
         registry.grant(ISSUER);
@@ -207,6 +209,9 @@ contract ClearingBellHookTest is Test {
     function test_RevertWhen_NoActiveRound() public {
         // A second bond token that IS KYC-registered but has NO active round.
         MockERC20 otherBond = new MockERC20("Other", "OTH", 18);
+        vm.prank(ISSUER);
+        engine.registerBondIssuer(address(otherBond), ISSUER);
+        vm.prank(ISSUER);
         gate.registerRegistry(address(otherBond), address(registry));
 
         PoolKey memory key = PoolKey({

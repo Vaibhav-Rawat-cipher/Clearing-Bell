@@ -35,14 +35,14 @@ contract AuctionEngineTest is Test {
 
         registry = new MockIdentityRegistry();
         gate = new ComplianceGate();
-        // The test contract is the deploying owner of ComplianceGate.
-        gate.registerRegistry(address(bond), address(registry));
-
         engine = new AuctionEngine(address(gate), ISSUER);
+        gate.setAuctionEngine(address(engine));
 
         // Register ISSUER as the bond issuer for the bond token (Option C multi-issuer).
         vm.prank(ISSUER);
         engine.registerBondIssuer(address(bond), ISSUER);
+        vm.prank(ISSUER);
+        gate.registerRegistry(address(bond), address(registry));
 
         // KYC everyone
         registry.grant(ISSUER);

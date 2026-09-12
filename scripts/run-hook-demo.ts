@@ -95,6 +95,7 @@ const GATE_ABI = parseAbi([
 ]);
 
 const ENGINE_ABI = parseAbi([
+  "function registerBondIssuer(address bondToken, address issuer) external",
   "function openRound(address bondToken, address settlementToken, uint256 bidWindow) external returns (uint256)",
   "function closeAndClear(uint256 roundId) external",
   "function setAuthorizedBidRelayer(address relayer, bool authorized) external",
@@ -266,6 +267,10 @@ async function main() {
   }));
 
   // Wire registry into ComplianceGate
+  await waitFor(pub, await deployer.wallet.writeContract({
+    address: ENGINE_ADDRESS, abi: ENGINE_ABI,
+    functionName: "registerBondIssuer", args: [bondAddress, deployer.address],
+  }));
   await waitFor(pub, await deployer.wallet.writeContract({
     address: GATE_ADDRESS, abi: GATE_ABI,
     functionName: "registerRegistry", args: [bondAddress, registryAddress],

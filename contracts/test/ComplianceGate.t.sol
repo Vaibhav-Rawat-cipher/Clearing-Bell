@@ -2,6 +2,7 @@
 pragma solidity ^0.8.26;
 
 import {Test, console} from "forge-std/Test.sol";
+import {AuctionEngine} from "src/auction/AuctionEngine.sol";
 import {ComplianceGate} from "src/auction/ComplianceGate.sol";
 import {MockIdentityRegistry} from "./mocks/MockIdentityRegistry.sol";
 
@@ -11,6 +12,7 @@ import {MockIdentityRegistry} from "./mocks/MockIdentityRegistry.sol";
 ///         registerRegistry() is permissionless per Option C.
 contract ComplianceGateTest is Test {
     ComplianceGate internal gate;
+    AuctionEngine internal engine;
     MockIdentityRegistry internal registry;
 
     address internal constant OWNER = address(0x0a1CE);
@@ -22,12 +24,14 @@ contract ComplianceGateTest is Test {
     function setUp() public {
         gate = new ComplianceGate();
         registry = new MockIdentityRegistry();
-        // The test contract is the deploying owner of ComplianceGate.
+        engine = new AuctionEngine(address(gate), address(this));
+        gate.setAuctionEngine(address(engine));
+        engine.registerBondIssuer(BOND, address(this));
         gate.registerRegistry(BOND, address(registry));
     }
 
     // =========================================================================
-    // Registry registration — permissionless (Option C)
+    // Registry registration — platform admin or registered issuer only
     // =========================================================================
 
     function test_RegisterRegistry_EmitsEvent() public {
@@ -37,8 +41,9 @@ contract ComplianceGateTest is Test {
         gate.registerRegistry(newBond, address(registry));
     }
 
-    function test_RegisterRegistry_Permissionless() public {
+    function test_RegisterRegistry_RegisteredIssuer() public {
         address newBond = address(0x0eab);
+        engine.registerBondIssuer(newBond, ALICE);
         vm.prank(ALICE);
         gate.registerRegistry(newBond, address(registry));
         assertTrue(gate.identityRegistry(newBond) == address(registry), "Alice registered bond registry");

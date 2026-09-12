@@ -44,10 +44,12 @@ const RPC_URL       = process.env.HEDERA_RPC_URL ?? "https://testnet.hashio.io/a
 const PKEY          = process.env.DEPLOYER_PRIVATE_KEY as Hex;
 const ENGINE_ADDR   = process.env.AUCTION_ENGINE_ADDRESS as Address;
 const CONFIG_ADDR   = process.env.BOND_CONFIG_ADDRESS as Address;
+const BOND_TOKEN    = process.env.BOND_TOKEN_ADDRESS as Address;
 
 if (!PKEY)        throw new Error("DEPLOYER_PRIVATE_KEY not set");
 if (!ENGINE_ADDR) throw new Error("AUCTION_ENGINE_ADDRESS not set in .env");
 if (!CONFIG_ADDR) throw new Error("BOND_CONFIG_ADDRESS not set in .env");
+if (!BOND_TOKEN)  throw new Error("BOND_TOKEN_ADDRESS not set in .env");
 
 // ─── Clients ─────────────────────────────────────────────────────────────────
 
@@ -98,11 +100,12 @@ async function send(label: string, ...args: Parameters<typeof client.writeContra
 const BEFORE_SWAP_FLAG = 1n << 7n;
 const AFTER_SWAP_FLAG  = 1n << 6n;
 const REQUIRED_FLAGS   = BEFORE_SWAP_FLAG | AFTER_SWAP_FLAG; // 0xC0
+const HOOK_FLAG_MASK   = (1n << 14n) - 1n;
 
 function hookAddressMatches(addr: Address): boolean {
   const addrBigInt = BigInt(addr);
   // Check that the lower bits match the required flags
-  return (addrBigInt & REQUIRED_FLAGS) === REQUIRED_FLAGS;
+  return (addrBigInt & HOOK_FLAG_MASK) === REQUIRED_FLAGS;
 }
 
 function mineCreate2Salt(
@@ -147,46 +150,43 @@ async function main() {
     poolManagerAddr = await deploy("PoolManager", pmArt.bytecode, pmArt.abi, [account.address]);
   }
 
-  // ── 2. Mine CREATE2 salt and deploy ClearingBellHook ───────────────────────
+  // ── 2. Deploy the HookDeployer factory before mining the hook address ────────────
+  // CREATE2 derives the address from the contract that executes CREATE2. The
+  // deployer contract, not the deployer EOA, must therefore be used for salt mining.
+  const factoryArt = loadArtifact("HookDeployer");
+  const factoryAddr = await deploy("HookDeployer", factoryArt.bytecode, factoryArt.abi);
+
+  // ── 3. Mine and deploy ClearingBellHook at a permission-encoded address ─────
   const hookArt = loadArtifact("ClearingBellHook");
-  const initCode = encodeDeployData({
-    abi: hookArt.abi,
-    bytecode: hookArt.bytecode,
+
+  console.log(`  Fetching initCodeHash from HookDeployer...`);
+  const initCodeHash = await client.readContract({
+    address: factoryAddr,
+    abi: factoryArt.abi,
+    functionName: "getInitCodeHash",
     args: [poolManagerAddr, ENGINE_ADDR],
-  });
-  const initCodeHash = keccak256(initCode);
+  }) as Hex;
 
-  const salt = mineCreate2Salt(account.address, initCodeHash);
+  const salt = mineCreate2Salt(factoryAddr, initCodeHash);
   const saltHex = `0x${salt.toString(16).padStart(64, "0")}` as Hex;
-
-  // Deploy using CREATE2 via a simple factory call
-  // We encode the salt + initcode and send to the deployer account's own CREATE2 logic
-  // Since Hedera supports CREATE2 natively via EVM, we deploy a minimal factory first
-  const factoryArt = loadArtifact("Create2Factory");
-  let factoryAddr: Address;
-  try {
-    factoryAddr = await deploy("Create2Factory", factoryArt.bytecode, factoryArt.abi);
-  } catch {
-    console.log(`  [!] Create2Factory artifact not found, using inline CREATE2`);
-    // Fallback: deploy without CREATE2 constraint (hook won't have permission-encoded address)
-    // This still works as a demo but bypasses the address flag check
-    const hookAddr = await deploy("ClearingBellHook (no CREATE2)", hookArt.bytecode, hookArt.abi, [
-      poolManagerAddr,
-      ENGINE_ADDR,
-    ]);
-    await finalize(hookAddr, poolManagerAddr);
-    return;
+  const expectedHookAddr = getCreate2Address({ from: factoryAddr, salt: saltHex, bytecodeHash: initCodeHash });
+  if (!hookAddressMatches(expectedHookAddr)) {
+    throw new Error(`Mined hook address lacks required permission bits: ${expectedHookAddr}`);
   }
 
   process.stdout.write(`  Deploying ClearingBellHook via CREATE2 ... `);
   const hash = await client.writeContract({
     address: factoryAddr,
     abi: factoryArt.abi,
-    functionName: "deploy",
-    args: [saltHex, initCode],
+    functionName: "deployHook",
+    args: [poolManagerAddr, ENGINE_ADDR, saltHex],
   });
   const receipt = await client.waitForTransactionReceipt({ hash });
-  const hookAddr = receipt.logs[0]?.address as Address;
+  const hookAddr = expectedHookAddr;
+  const deployedCode = await client.getCode({ address: hookAddr });
+  if (!deployedCode || deployedCode === "0x") {
+    throw new Error(`CREATE2 deployment produced no code at the expected hook address: ${hookAddr}`);
+  }
   console.log(`done`);
   console.log(`    tx   : ${hash}`);
   console.log(`    addr : ${hookAddr}`);
@@ -208,7 +208,7 @@ async function finalize(hookAddr: Address, poolManagerAddr: Address) {
   // Set hook in BondConfig
   await send(
     "BondConfig.setHook",
-    { address: CONFIG_ADDR, abi: bondConfigArt.abi, functionName: "setHook", args: [hookAddr] }
+    { address: CONFIG_ADDR, abi: bondConfigArt.abi, functionName: "setHook", args: [BOND_TOKEN, hookAddr] }
   );
 
   console.log(``);

@@ -74,6 +74,10 @@ contract Deploy is Script {
         // --- 3. AuctionEngine ---
         AuctionEngine engine = new AuctionEngine(address(gate), issuer);
         console.log("AuctionEngine       :", address(engine));
+        gate.setAuctionEngine(address(engine));
+        if (bondToken != address(0)) {
+            engine.registerBondIssuer(bondToken, issuer);
+        }
 
         // --- 4. ClearingBellHook (CREATE2, permission-encoded address) ---
         address hookAddr;
