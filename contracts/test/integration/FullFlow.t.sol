@@ -85,6 +85,10 @@ contract FullFlowTest is Test {
         // 4. AuctionEngine
         engine = new AuctionEngine(address(gate), ISSUER);
 
+        // Register ISSUER as the bond issuer (Option C multi-issuer).
+        vm.prank(ISSUER);
+        engine.registerBondIssuer(address(bond), ISSUER);
+
         // 5. KYC: Alice, Bob, Carol — NOT Mallory
         registry.grant(ISSUER);
         registry.grant(ALICE);

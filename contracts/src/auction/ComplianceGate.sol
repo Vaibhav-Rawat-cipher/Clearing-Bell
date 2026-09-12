@@ -9,6 +9,11 @@ interface IIdentityRegistry {
     function registrationDateOf(address userAddress) external view returns (uint256);
 }
 
+interface IAuctionEngine {
+    function platformAdmin() external view returns (address);
+    function bondIssuers(address bondToken) external view returns (address);
+}
+
 /// @title ComplianceGate
 /// @notice Lightweight wrapper that checks whether a given address is KYC-approved
 ///         for trading a specific bond token, by querying the ATS identity registry.
@@ -17,6 +22,8 @@ interface IIdentityRegistry {
 ///      This is intentional: single source of truth, no data duplication.
 ///
 ///      Used by AuctionEngine to gate bid submission and re-checked at settlement.
+///
+/// @custom:security-contact security@clearingbell.xyz
 contract ComplianceGate {
     // =========================================================================
     // State
@@ -25,8 +32,11 @@ contract ComplianceGate {
     /// @notice Maps bondToken address → its ATS identity registry address.
     mapping(address => address) public identityRegistry;
 
-    /// @notice Owner/admin who can register new bond token registries.
-    address public owner;
+    /// @notice Registry admin — can still register new bonds if needed.
+    address public deployer;
+
+    /// @notice The central AuctionEngine used for RBAC checks.
+    IAuctionEngine public auctionEngine;
 
     // =========================================================================
     // Events
@@ -38,30 +48,42 @@ contract ComplianceGate {
     // Errors
     // =========================================================================
 
-    error NotOwner();
     error RegistryNotSet(address bondToken);
+    error NotAuthorized();
+    error EngineNotSet();
+    error AlreadySet();
 
     // =========================================================================
     // Constructor
     // =========================================================================
 
     constructor() {
-        owner = msg.sender;
+        deployer = msg.sender;
     }
 
     // =========================================================================
-    // Admin
+    // Registry Registration
     // =========================================================================
 
-    modifier onlyOwner() {
-        if (msg.sender != owner) revert NotOwner();
-        _;
+    /// @notice Set the central AuctionEngine address for RBAC.
+    /// @dev Called once by the deployer after the engine is deployed.
+    function setAuctionEngine(address _engine) external {
+        if (msg.sender != deployer) revert NotAuthorized();
+        if (address(auctionEngine) != address(0)) revert AlreadySet();
+        auctionEngine = IAuctionEngine(_engine);
     }
 
     /// @notice Register the ATS identity registry address for a given bond token.
-    /// @dev Called once after deploying a new bond via ATS. The registry address
-    ///      comes from the ATS deployment output.
-    function registerRegistry(address bondToken, address registry) external onlyOwner {
+    /// @dev Only the platform admin or the registered bond issuer can call this.
+    /// @param bondToken The ERC-3643 bond token contract address.
+    /// @param registry  The ATS identity registry contract address.
+    function registerRegistry(address bondToken, address registry) external {
+        if (address(auctionEngine) == address(0)) revert EngineNotSet();
+        
+        address admin = auctionEngine.platformAdmin();
+        address issuer = auctionEngine.bondIssuers(bondToken);
+        if (msg.sender != admin && msg.sender != issuer) revert NotAuthorized();
+
         identityRegistry[bondToken] = registry;
         emit RegistryRegistered(bondToken, registry);
     }

@@ -1,0 +1,39 @@
+{
+  "name": "clearing-bell-ui",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "scripts": {
+    "dev": "vite --host 127.0.0.1 --strictPort",
+    "build": "tsc -b && vite build",
+    "lint": "eslint .",
+    "preview": "vite preview --host 127.0.0.1",
+    "test": "node --experimental-strip-types --test tests/*.test.ts"
+  },
+  "dependencies": {
+    "@fontsource-variable/ibm-plex-sans": "^5.3.0",
+    "@fontsource-variable/newsreader": "^5.3.0",
+    "@fontsource/ibm-plex-mono": "^5.3.0",
+    "@react-three/fiber": "^9.7.0",
+    "lucide-react": "latest",
+    "motion": "^13.1.1",
+    "react": "latest",
+    "react-dom": "latest",
+    "three": "0.182.0",
+    "viem": "^2.56.3"
+  },
+  "devDependencies": {
+    "@eslint/js": "latest",
+    "@types/react": "latest",
+    "@types/react-dom": "latest",
+    "@types/three": "0.182.0",
+    "@vitejs/plugin-react": "^6.1.1",
+    "eslint": "latest",
+    "eslint-plugin-react-hooks": "latest",
+    "eslint-plugin-react-refresh": "latest",
+    "globals": "latest",
+    "typescript": "^6.0.3",
+    "typescript-eslint": "latest",
+    "vite": "^8.2.2"
+  }
+}

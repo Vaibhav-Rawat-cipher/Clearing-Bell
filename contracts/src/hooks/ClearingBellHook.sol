@@ -81,7 +81,7 @@ contract ClearingBellHook is BaseHook {
     error BidderNotEligible(address bidder);
     error NoActiveRound(address bondToken);
     error InvalidHookData();
-    error NotIssuer();
+    error NotBondIssuer(address bondToken);
     error ZeroQuantity();
 
     // =========================================================================
@@ -202,7 +202,7 @@ contract ClearingBellHook is BaseHook {
     /// @param roundId   The auction round that just cleared.
     /// @param bondToken The bond token address for this pool.
     function afterEpochClose(uint256 roundId, address bondToken) external {
-        if (msg.sender != auctionEngine.issuer()) revert NotIssuer();
+        if (msg.sender != auctionEngine.bondIssuers(bondToken)) revert NotBondIssuer(bondToken);
 
         // Read the clearing price from the engine's round storage.
         (, , , , , uint256 clearingPrice, ,) = auctionEngine.rounds(roundId);
@@ -219,7 +219,7 @@ contract ClearingBellHook is BaseHook {
     /// @notice Register the active AuctionEngine round for a bond token pool.
     /// @dev Called by the issuer immediately after AuctionEngine.openRound().
     function setActiveRound(address bondToken, uint256 roundId) external {
-        if (msg.sender != auctionEngine.issuer()) revert NotIssuer();
+        if (msg.sender != auctionEngine.bondIssuers(bondToken)) revert NotBondIssuer(bondToken);
         activeRound[bondToken] = roundId;
     }
 }

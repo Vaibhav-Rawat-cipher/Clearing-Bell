@@ -40,6 +40,10 @@ contract AuctionEngineTest is Test {
 
         engine = new AuctionEngine(address(gate), ISSUER);
 
+        // Register ISSUER as the bond issuer for the bond token (Option C multi-issuer).
+        vm.prank(ISSUER);
+        engine.registerBondIssuer(address(bond), ISSUER);
+
         // KYC everyone
         registry.grant(ISSUER);
         registry.grant(ALICE);
@@ -237,13 +241,13 @@ contract AuctionEngineTest is Test {
 
     function test_RevertWhen_NonIssuerOpensRound() public {
         vm.prank(ALICE);
-        vm.expectRevert(AuctionEngine.NotIssuer.selector);
+        vm.expectRevert(abi.encodeWithSelector(AuctionEngine.NotBondIssuer.selector, address(bond)));
         engine.openRound(address(bond), address(usdc), 1 hours);
     }
 
     function test_RevertWhen_NonIssuerPauses() public {
         vm.prank(ALICE);
-        vm.expectRevert(AuctionEngine.NotIssuer.selector);
+        vm.expectRevert(AuctionEngine.NotPlatformAdmin.selector);
         engine.pause();
     }
 
@@ -380,6 +384,95 @@ contract AuctionEngineTest is Test {
         vm.prank(ALICE);
         vm.expectRevert(abi.encodeWithSelector(AuctionEngine.RoundStillOpen.selector, roundId));
         engine.closeAndClear(roundId);
+    }
+
+    function test_RevocationUpdatesRecordedClearingQuantity() public {
+        uint256 id = _openRound(1 hours);
+        vm.prank(ALICE);
+        engine.submitBid(id, 100 * USD, 100 * TOK, true);
+        vm.prank(BOB);
+        engine.submitBid(id, 100 * USD, 20 * TOK, true);
+        vm.prank(CAROL);
+        engine.submitBid(id, 100 * USD, 100 * TOK, false);
+        registry.revoke(ALICE);
+        vm.prank(ISSUER);
+        engine.closeAndClear(id);
+        assertEq(_getRound(id).clearedQuantity, 20 * TOK);
+    }
+
+    function test_AllBuyersRevokedReportsNoCrossing() public {
+        uint256 id = _openRound(1 hours);
+        vm.prank(ALICE);
+        engine.submitBid(id, 100 * USD, TOK, true);
+        vm.prank(CAROL);
+        engine.submitBid(id, 100 * USD, TOK, false);
+        registry.revoke(ALICE);
+        vm.prank(ISSUER);
+        engine.closeAndClear(id);
+        assertEq(_getRound(id).clearingPrice, 0);
+        assertEq(_getRound(id).clearedQuantity, 0);
+    }
+
+    function test_FractionalBuyFillsConserveCash() public {
+        uint256 id = _openRound(1 hours);
+        uint256 aliceCash = usdc.balanceOf(ALICE);
+        uint256 bobCash = usdc.balanceOf(BOB);
+        vm.prank(ALICE);
+        engine.submitBid(id, 1, 0.6 ether, true);
+        vm.prank(BOB);
+        engine.submitBid(id, 1, 0.6 ether, true);
+        vm.prank(CAROL);
+        engine.submitBid(id, 1, 1.2 ether, false);
+        vm.prank(ISSUER);
+        engine.closeAndClear(id);
+        assertEq(usdc.balanceOf(ALICE), aliceCash);
+        assertEq(usdc.balanceOf(BOB), bobCash - 1);
+        assertEq(usdc.balanceOf(CAROL), 1);
+        assertEq(usdc.balanceOf(address(engine)), 0);
+        assertEq(bond.balanceOf(address(engine)), 0);
+    }
+
+    function test_FractionalSellFillsLeaveNoResidualCash() public {
+        uint256 id = _openRound(1 hours);
+        uint256 bobCash = usdc.balanceOf(BOB);
+        vm.prank(ALICE);
+        engine.submitBid(id, 1, 1.2 ether, true);
+        vm.prank(BOB);
+        engine.submitBid(id, 1, 0.6 ether, false);
+        vm.prank(CAROL);
+        engine.submitBid(id, 1, 0.6 ether, false);
+        vm.prank(ISSUER);
+        engine.closeAndClear(id);
+        assertEq(usdc.balanceOf(BOB), bobCash);
+        assertEq(usdc.balanceOf(CAROL), 1);
+        assertEq(usdc.balanceOf(address(engine)), 0);
+        assertEq(bond.balanceOf(address(engine)), 0);
+    }
+
+    function testFuzz_FractionalSettlementConservesCash(uint96 first, uint96 second, uint64 priceSeed)
+        public
+    {
+        uint256 firstQty = uint256(first) % (10 * TOK) + 1;
+        uint256 secondQty = uint256(second) % (10 * TOK) + 1;
+        uint256 price = uint256(priceSeed) % (200 * USD) + 1;
+        uint256 id = _openRound(1 hours);
+        uint256 aliceCash = usdc.balanceOf(ALICE);
+        uint256 bobCash = usdc.balanceOf(BOB);
+        vm.prank(ALICE);
+        engine.submitBid(id, price, firstQty, true);
+        vm.prank(BOB);
+        engine.submitBid(id, price, secondQty, true);
+        vm.prank(CAROL);
+        engine.submitBid(id, price, firstQty + secondQty, false);
+        vm.prank(ISSUER);
+        engine.closeAndClear(id);
+        uint256 aggregatePayment = (firstQty + secondQty) * price / TOK;
+        assertEq(usdc.balanceOf(CAROL), aggregatePayment);
+        assertEq(aliceCash - usdc.balanceOf(ALICE) + bobCash - usdc.balanceOf(BOB), aggregatePayment);
+        assertEq(usdc.balanceOf(address(engine)), 0);
+        assertEq(bond.balanceOf(address(engine)), 0);
+        assertLe(aliceCash - usdc.balanceOf(ALICE), (firstQty * price + TOK - 1) / TOK);
+        assertLe(bobCash - usdc.balanceOf(BOB), (secondQty * price + TOK - 1) / TOK);
     }
 
     function test_IssuerCanCloseEarly() public {

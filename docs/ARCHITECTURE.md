@@ -1,109 +1,74 @@
-# Clearing Bell — Architecture
+# Connected application architecture
 
-## System Overview
+## Runtime boundary
 
-Clearing Bell is a compliance-gated batch-auction secondary market for tokenized securities. It combines Hedera ATS for compliant bond issuance with a Uniswap v4 hook that intercepts swaps and routes them through a periodic batch auction engine.
-
-## Component Diagram
-
-```
-┌──────────────────────────────────────────────────────────────────────┐
-│                        Hedera Testnet                                │
-│                                                                      │
-│  ┌──────────────┐     ┌─────────────────┐     ┌─────────────────┐    │
-│  │   Hedera     │     │   Uniswap v4    │     │   Frontend      │    │
-│  │     ATS      │     │   PoolManager   │     │   Frontend      │    │
-│  │              │     │                 │     │                 │    │
-│  │  Bond Token  │     │  ┌───────────┐  │     │  /issuer        │    │
-│  │  (ERC-3643)  │     │  │ Clearing  │  │     │  /bidder        │    │
-│  │              │     │  │ BellHook  │  │     │  /auctions/[id] │    │
-│  │  Identity    │◄────┼──│           │  │     │                 │    │
-│  │  Registry    │     │  │beforeSwap │  │     └────────┬────────┘    │
-│  │  (KYC store) │     │  └─────┬─────┘  │              │             │
-│  └──────────────┘     │        │        │              │             │
-│         ▲             └────────┼────────┘     JSON-RPC │             │
-│         │                      │                       │             │
-│  ┌──────┴──────┐     ┌─────────▼──────────────────────▼──────────┐   │
-│  │ Compliance  │     │              AuctionEngine                  │ │
-│  │    Gate     │◄────│                                             │ │
-│  │             │     │  openRound() → submitBid() → closeAndClear()│ │
-│  │ isEligible()│     │                                             │ │
-│  └─────────────┘     │  ┌──────────────────────────────────────┐   │ │
-│                      │  │             ClearingLib              │   │ │
-│                      │  │  (pure library — no state)           │   │ │
-│                      │  │                                      │   │ │
-│                      │  │  computeClearingPrice(bids[])        |   │ │
-│                      │  │  matchBids(bids[], clearingPrice)    │   │ │
-│                      │  └──────────────────────────────────────┘   │ │
-│                      └─────────────────────────────────────────────┘ │
-└──────────────────────────────────────────────────────────────────────┘
+```text
+React pages + shared components
+             ↓
+Wallet session and transaction coordinator
+        ↙                         ↘
+Read-only viem RPC client      EIP-1193 wallet
+        ↓                     (local Anvil only in DEV)
+        └───────────┬─────────────┘
+               AuctionEngine
+                ↙         ↘
+      ComplianceGate      ClearingLib
+             ↓                 ↓
+      Identity registry   uniform-price allocations
+                          and atomic ERC-20 transfers
 ```
 
-## Data Flow: Full Auction Round
+The frontend is a static Vite build. Contracts are the application backend; no custom API server, private-key service, or database was introduced. The optional existing Uniswap hook is outside the verified frontend execution path.
 
-```
-1. Issuer                AuctionEngine.openRound(bondToken, window)
-                                  │
-2. Bidder A/B/C          submitBid(roundId, price, qty, isSell)
-                                  │
-                         ComplianceGate.isEligible(bidder) ─── if false: revert
-                                  │
-3. [time passes / manual close]
-                                  │
-4. Anyone                closeAndClear(roundId)
-                                  │
-                         ClearingLib.computeClearingPrice(allBids)
-                                  ▼
-                         clearingPrice set, phase = Cleared
-                                  │
-5. Settlement            settle(roundId) ← called internally
-                                  │
-                         For each filled bid:
-                           if buyer: receive bond tokens, pay USDC
-                           if seller: receive USDC, transfer bond tokens
-                         All in a single atomic transaction
-```
+## Module contracts
 
-## Contract Responsibilities
+| Module | Responsibility |
+| --- | --- |
+| `src/lib/config.ts` | Parse explicit deployment settings or public manifest; restrict unlocked accounts to local development |
+| `src/lib/chain.ts` | Validate chain/code, read rounds and public bids, resolve token metadata, registry result, balances, allowances and receipts |
+| `src/lib/amounts.ts` | Exact BigInt parsing, token precision, overflow checks and total own-order funding exposure |
+| `src/lib/errors.ts` | Translate wallet/RPC/contract errors into actionable messages |
+| `src/context/` | Account/network changes, transaction lock, simulation, signature, receipt confirmation and refreshing |
+| `src/components/ui/` | Accessible dialogs, status, error/empty/loading states and copy/explorer references |
+| `src/components/scene/` | Optional lazy-loaded process schematic; never authoritative trading state |
+| `src/pages/` | Task-focused views composed from the same read model |
 
-| Contract | Type | State | Key Dependencies |
-|---|---|---|---|
-| `ClearingLib` | Library | None (pure) | — |
-| `ComplianceGate` | Contract | None (view-only) | ATS Identity Registry |
-| `AuctionEngine` | Contract | Rounds, Bids | ClearingLib, ComplianceGate |
-| `ClearingBellHook` | Contract | Pool state | AuctionEngine, PoolManager |
-| `BondConfig` | Script/Config | Deployed via ATS | ATS SDK |
-| `CouponScheduler` | Contract | Scheduled actions | ATS Corporate Actions |
+Metadata is resolved from token contracts, not a hardcoded product catalogue. Portfolio quantities come from `balanceOf`; transaction receipts come from `Settled` events. The order depth chart comes from `getRoundBids`. Unknown values remain unknown.
 
-## Phase State Machine (AuctionRound)
+## Actual auction lifecycle
 
-```
-         openRound()              closeAndClear()
-Closed ──────────────► Open ──────────────────► Cleared
-                         ▲
-                         │  submitBid() accepted here only
-                         │
-                  [commit window]
-```
+1. Issuer calls `openRound(bondToken, settlementToken, bidWindowSeconds)`.
+2. Eligible wallets approve their funding token and call `submitBid(roundId, price, quantity, isBuy)` before the deadline.
+3. Orders are public and remain in contract storage. The contract does not escrow them or provide cancellation.
+4. Issuer can call `closeAndClear` early; any wallet can call it after the deadline.
+5. Eligibility is rechecked and revoked participants excluded before pricing and matching.
+6. The engine computes a uniform price maximizing matched volume. Allocation has price priority and is pro-rata within each price level.
+7. Buyers and sellers transfer payment and bonds atomically. Final round state is Closed; Cleared is an internal intermediate state.
 
-## Security Model
+Bond quantities use 18 decimals. Prices use settlement-token decimals per one whole bond. Payment uses cumulative-floor quotes per side so collected and distributed totals match; frontend buy approvals conservatively reserve the ceiling for each order.
 
-1. **Compliance dual-check**: Eligibility is verified at bid submission AND at settlement. A revoked KYC between rounds cannot receive securities.
-2. **Re-entrancy protection**: `settle()` uses OpenZeppelin `ReentrancyGuard`. Transfers are ordered: collect payment first, then deliver asset.
-3. **Access control**: Only the issuer address can call `openRound()`, `closeAndClear()`, and schedule corporate actions.
-4. **Emergency pause**: `AuctionEngine` inherits `Pausable` — the issuer can halt all activity instantly.
+## UI responsibilities
 
-## Hedera-specific Notes
+- **Home:** product purpose, latest actual round, process explanation, workflow entry points.
+- **Markets:** searchable open/closed round directory; selecting a row selects that exact round.
+- **Auction:** real deadline, public depth and order table, wallet eligibility, allowance + order controls, close confirmation and final result.
+- **Portfolio:** balances, engine allowances, own open bids, settlement events, working CSV exports.
+- **Issuer:** actual issuer authorization, create round, pause/resume, round review and deployed contract references.
 
-- The bond token is deployed via Hedera ATS, which wraps ERC-3643 and stores identity data natively on Hedera
-- `ComplianceGate` queries the ATS identity registry via the Hedera JSON-RPC relay endpoint
-- Scheduled Transactions (Hedera-native feature) are used by `CouponScheduler` for automatic coupon payments
-- All smart contracts are deployed to the Hedera EVM (chain ID 296 for testnet)
+Unsupported coupon schedules, sealed-order claims, fake price changes, static holdings and nonfunctional document actions were removed.
 
-## Uniswap v4 Integration
+## Reliability and limits
 
-The `ClearingBellHook` registers with hook permission bits:
-- `beforeSwap = true` — intercepts all swaps and queues them as bids
-- `afterSwap = true` — emits post-settlement price update events for indexers
+- Deployment settings must be complete; no automatic external-network fallback.
+- Account and selected-round changes invalidate stale in-flight reads.
+- Refresh is periodic while visible, with manual retry.
+- Every write validates wallet chain/account, simulates against the RPC and waits for successful inclusion.
+- Transaction locks prevent duplicate clicks; unknown receipt outcomes poll the original hash.
+- The environment name/chain remain visible. Local assets are identified as test assets.
+- Local accounts never use private keys in browser code.
+- The latest 100 rounds and 20,000 blocks of events are loaded with bounded request batches. This is intentionally not a production indexer.
+- WebGL loads near the viewport, pauses offscreen, honors reduced motion and has a readable fallback. External Spline assets are optional and have a load timeout.
 
-The hook converts a standard Uniswap swap (zeroForOne + amount) into a `Bid` struct and calls `AuctionEngine.submitBid()`. The pool's effective price is updated to the clearing price after each round closes.
+## What is not verified for production
+
+Non-escrow settlement can be blocked by withdrawn funds/allowances. The local identity registry is a fixture. Uniswap real-PoolManager behavior remains outside this path. No CouponScheduler exists in this repository. Production deployment requires a real security/identity policy and an independent security review.

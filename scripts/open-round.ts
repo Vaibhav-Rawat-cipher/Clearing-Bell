@@ -19,7 +19,8 @@ import { createWalletClient, http, publicActions, parseAbi } from "viem";
 import { privateKeyToAccount } from "viem/accounts";
 import { hederaTestnet } from "viem/chains";
 
-config({ path: "../.env" });
+import { resolve } from "path";
+config({ path: resolve(__dirname, "../.env") });
 
 const ENGINE_ADDRESS = process.env.AUCTION_ENGINE_ADDRESS! as `0x${string}`;
 const HOOK_ADDRESS   = process.env.HOOK_ADDRESS!            as `0x${string}`;
@@ -51,7 +52,19 @@ async function main() {
   console.log(`Bond    : ${BOND_ADDRESS}`);
   console.log(`Window  : ${BID_WINDOW}s (${Number(BID_WINDOW) / 3600}h)`);
 
-  // 1. Open round on engine
+  // 1. Check if we are the registered issuer
+  const bondIssuer = await client.readContract({
+    address: ENGINE_ADDRESS,
+    abi: parseAbi(["function bondIssuers(address) view returns (address)"]),
+    functionName: "bondIssuers",
+    args: [BOND_ADDRESS],
+  });
+
+  if (bondIssuer.toLowerCase() !== account.address.toLowerCase()) {
+    throw new Error(`Caller ${account.address} is not the registered issuer for bond ${BOND_ADDRESS}. Current issuer is ${bondIssuer}`);
+  }
+
+  // 2. Open round on engine
   const hash = await client.writeContract({
     address: ENGINE_ADDRESS,
     abi: ENGINE_ABI,
@@ -69,8 +82,10 @@ async function main() {
 
   // roundId is the first indexed topic (after the event signature)
   const roundId = BigInt(log.topics[1]!);
+  // data contains settlementToken (first 32 bytes) and openDeadline (next 32 bytes)
+  const openDeadlineHex = log.data.slice(66, 130);
   const deadline = new Date(
-    (Number(BigInt(log.data.slice(0, 66)) || 0)) * 1000
+    (Number(BigInt("0x" + openDeadlineHex) || 0)) * 1000
   ).toISOString();
 
   console.log(`\n✅ Round ${roundId} opened`);

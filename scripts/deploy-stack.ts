@@ -137,14 +137,36 @@ async function main() {
   // 3. ComplianceGate
   const gateAddr = await deploy("ComplianceGate", gateArt.bytecode, gateArt.abi);
 
-  // 4. AuctionEngine (needs ComplianceGate addr + issuer)
+  // 4. AuctionEngine (needs ComplianceGate addr + platformAdmin)
   const engineAddr = await deploy("AuctionEngine", engineArt.bytecode, engineArt.abi, [
     gateAddr,
-    account.address, // issuer = deployer for testnet
+    account.address, // platformAdmin = deployer
   ]);
+
+  // 4b. Wire up ComplianceGate -> AuctionEngine
+  await send(
+    "ComplianceGate.setAuctionEngine",
+    {
+      address: gateAddr,
+      abi: gateArt.abi,
+      functionName: "setAuctionEngine",
+      args: [engineAddr],
+    }
+  );
 
   // 5. Wire up BondConfig if bond token is set
   if (BOND_TOKEN && BOND_TOKEN.startsWith("0x") && BOND_TOKEN.length === 42) {
+    // Auto-register deployer as issuer for this bond (multi-issuer: deployer = first company)
+    await send(
+      "AuctionEngine.registerBondIssuer (deployer → CBB28)",
+      {
+        address: engineAddr,
+        abi: engineArt.abi,
+        functionName: "registerBondIssuer",
+        args: [BOND_TOKEN, account.address],
+      }
+    );
+
     await send(
       "BondConfig.configure",
       {
@@ -181,6 +203,11 @@ async function main() {
   console.log(`COMPLIANCE_GATE_ADDRESS="${gateAddr}"`);
   console.log(`AUCTION_ENGINE_ADDRESS="${engineAddr}"`);
   console.log(``);
+  console.log(`  platformAdmin (deployer): ${account.address}`);
+  if (BOND_TOKEN && BOND_TOKEN.startsWith("0x") && BOND_TOKEN.length === 42) {
+    console.log(`  bondIssuers[${BOND_TOKEN}] = ${account.address}`);
+    console.log(`  → Run 'register-issuer.ts' to grant issuer rights to a company wallet.`);
+  }
   console.log("  HashScan:");
   console.log(`  MockUSDC       https://hashscan.io/testnet/contract/${usdcAddr}`);
   console.log(`  BondConfig     https://hashscan.io/testnet/contract/${bondConfigAddr}`);

@@ -8,6 +8,7 @@ import {MockIdentityRegistry} from "./mocks/MockIdentityRegistry.sol";
 /// @title ComplianceGate Unit Tests
 /// @notice Coverage per PLAN.md §8: eligible / not-eligible / revoked-mid-round,
 ///         plus registry registration and guardrails.
+///         registerRegistry() is permissionless per Option C.
 contract ComplianceGateTest is Test {
     ComplianceGate internal gate;
     MockIdentityRegistry internal registry;
@@ -16,6 +17,7 @@ contract ComplianceGateTest is Test {
     address internal constant BOND = address(0xB0A0A);
     address internal constant ALICE = address(0xA11CE);
     address internal constant BOB = address(0xB0B);
+    address internal constant CAROL = address(0xCA401);
 
     function setUp() public {
         gate = new ComplianceGate();
@@ -25,7 +27,7 @@ contract ComplianceGateTest is Test {
     }
 
     // =========================================================================
-    // Registry registration
+    // Registry registration — permissionless (Option C)
     // =========================================================================
 
     function test_RegisterRegistry_EmitsEvent() public {
@@ -35,10 +37,11 @@ contract ComplianceGateTest is Test {
         gate.registerRegistry(newBond, address(registry));
     }
 
-    function test_RevertWhen_NonOwnerRegisters() public {
+    function test_RegisterRegistry_Permissionless() public {
+        address newBond = address(0x0eab);
         vm.prank(ALICE);
-        vm.expectRevert(ComplianceGate.NotOwner.selector);
-        gate.registerRegistry(BOND, address(registry));
+        gate.registerRegistry(newBond, address(registry));
+        assertTrue(gate.identityRegistry(newBond) == address(registry), "Alice registered bond registry");
     }
 
     // =========================================================================

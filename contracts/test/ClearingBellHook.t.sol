@@ -60,6 +60,10 @@ contract ClearingBellHookTest is Test {
 
         engine = new AuctionEngine(address(gate), ISSUER);
 
+        // Register ISSUER as the bond issuer (Option C multi-issuer).
+        vm.prank(ISSUER);
+        engine.registerBondIssuer(address(bond), ISSUER);
+
         // KYC everyone.
         registry.grant(ISSUER);
         registry.grant(ALICE);
@@ -278,7 +282,7 @@ contract ClearingBellHookTest is Test {
 
     function test_RevertWhen_NonIssuerCallsAfterEpochClose() public {
         vm.prank(ALICE);
-        vm.expectRevert(ClearingBellHook.NotIssuer.selector);
+        vm.expectRevert(abi.encodeWithSelector(ClearingBellHook.NotBondIssuer.selector, address(bond)));
         hook.afterEpochClose(activeRoundId, address(bond));
     }
 
@@ -288,7 +292,7 @@ contract ClearingBellHookTest is Test {
 
     function test_RevertWhen_NonIssuerSetsActiveRound() public {
         vm.prank(ALICE);
-        vm.expectRevert(ClearingBellHook.NotIssuer.selector);
+        vm.expectRevert(abi.encodeWithSelector(ClearingBellHook.NotBondIssuer.selector, address(bond)));
         hook.setActiveRound(address(bond), activeRoundId);
     }
 

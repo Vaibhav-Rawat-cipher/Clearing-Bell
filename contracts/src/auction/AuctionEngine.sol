@@ -5,18 +5,26 @@ import {ReentrancyGuard} from "@openzeppelin/contracts/utils/ReentrancyGuard.sol
 import {Pausable} from "@openzeppelin/contracts/utils/Pausable.sol";
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import {SafeERC20} from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
+import {Math} from "@openzeppelin/contracts/utils/math/Math.sol";
 import {ClearingLib} from "./ClearingLib.sol";
 import {ComplianceGate} from "./ComplianceGate.sol";
 
 /// @title AuctionEngine
-/// @notice Orchestrates periodic sealed-bid batch auction rounds for a compliant bond token.
+/// @notice Orchestrates periodic open-order batch auction rounds for compliant bond tokens.
 ///
-/// @dev Flow per round:
-///      1. Issuer calls openRound() to start a new auction.
-///      2. KYC'd bidders call submitBid() during the open window.
-///      3. Anyone (or the issuer) calls closeAndClear() after the window ends.
-///      4. ClearingLib computes the uniform clearing price.
-///      5. settle() runs atomically: bond tokens and stablecoin swap hands.
+/// @dev Multi-issuer platform architecture:
+///      - platformAdmin (Clearing Bell) approves companies as bond issuers.
+///      - Each bond token maps to exactly one issuer address.
+///      - Issuers can only open/close/pause rounds for bonds they are registered for.
+///      - platformAdmin can pause/unpause the entire engine globally.
+///
+///      Flow per round:
+///      1. platformAdmin registers a company wallet as issuer for their bond token.
+///      2. Company (issuer) calls openRound() for their bond.
+///      3. KYC'd investors call submitBid() during the open window.
+///      4. Anyone (or the issuer) calls closeAndClear() after the deadline.
+///      5. ClearingLib computes the uniform clearing price.
+///      6. Settlement runs atomically: both tokens swap hands.
 ///
 /// MVP note: This implementation uses open (non-commit-reveal) bidding.
 /// Commit-reveal is the production hardening step documented in the README.
@@ -50,7 +58,15 @@ contract AuctionEngine is ReentrancyGuard, Pausable {
     // =========================================================================
 
     ComplianceGate public immutable complianceGate;
-    address public issuer;
+
+    /// @notice Clearing Bell platform admin — the only address that can register bond issuers.
+    address public platformAdmin;
+
+    /// @notice Maps bond token address → the company wallet authorized to open rounds for it.
+    mapping(address bondToken => address issuer) public bondIssuers;
+
+    /// @notice Whether a specific bond's rounds are paused (bond-level pause by issuer).
+    mapping(address bondToken => bool paused) public bondPaused;
 
     uint256 public nextRoundId;
     mapping(uint256 => AuctionRound) public rounds;
@@ -86,11 +102,22 @@ contract AuctionEngine is ReentrancyGuard, Pausable {
     event RoundClosedWithNoCrossing(uint256 indexed roundId);
     event BidRelayerUpdated(address indexed relayer, bool authorized);
 
+    /// @notice Emitted when a company is registered as the issuer for a bond token.
+    event BondIssuerRegistered(address indexed bondToken, address indexed issuer);
+
+    /// @notice Emitted when platform admin role is transferred.
+    event PlatformAdminTransferred(address indexed oldAdmin, address indexed newAdmin);
+
+    /// @notice Emitted when a bond's auction rounds are paused or unpaused by the issuer.
+    event BondPauseChanged(address indexed bondToken, bool paused);
+
     // =========================================================================
     // Errors
     // =========================================================================
 
-    error NotIssuer();
+    error NotPlatformAdmin();
+    error NotBondIssuer(address bondToken);
+    error BondNotRegistered(address bondToken);
     error RoundNotOpen(uint256 roundId);
     error RoundStillOpen(uint256 roundId);
     error RoundAlreadyCleared(uint256 roundId);
@@ -100,13 +127,21 @@ contract AuctionEngine is ReentrancyGuard, Pausable {
     error InvalidBidQuantity();
     error ZeroAddress();
     error NotAuthorizedBidRelayer();
+    error BondRoundsPaused(address bondToken);
 
     // =========================================================================
     // Modifiers
     // =========================================================================
 
-    modifier onlyIssuer() {
-        if (msg.sender != issuer) revert NotIssuer();
+    modifier onlyPlatformAdmin() {
+        if (msg.sender != platformAdmin) revert NotPlatformAdmin();
+        _;
+    }
+
+    /// @notice Restricts a call to the registered issuer for a specific bond token.
+    modifier onlyBondIssuer(address bondToken) {
+        if (bondIssuers[bondToken] == address(0)) revert BondNotRegistered(bondToken);
+        if (msg.sender != bondIssuers[bondToken]) revert NotBondIssuer(bondToken);
         _;
     }
 
@@ -119,29 +154,86 @@ contract AuctionEngine is ReentrancyGuard, Pausable {
     // Constructor
     // =========================================================================
 
-    constructor(address _complianceGate, address _issuer) {
-        if (_complianceGate == address(0) || _issuer == address(0)) revert ZeroAddress();
+    /// @param _complianceGate  Address of the ComplianceGate contract.
+    /// @param _platformAdmin   Clearing Bell platform admin address.
+    constructor(address _complianceGate, address _platformAdmin) {
+        if (_complianceGate == address(0) || _platformAdmin == address(0)) revert ZeroAddress();
         complianceGate = ComplianceGate(_complianceGate);
-        issuer = _issuer;
+        platformAdmin = _platformAdmin;
         nextRoundId = 1;
+    }
+
+    // =========================================================================
+    // Platform Admin — Issuer Registration
+    // =========================================================================
+
+    /// @notice Register a company wallet as the authorized issuer for a bond token.
+    /// @dev Only the platformAdmin can call this. Each bond has exactly one issuer.
+    ///      Call again with a new address to transfer issuer rights for a bond.
+    /// @param bondToken  The ERC-3643 bond token address.
+    /// @param company    The company wallet that will control auctions for this bond.
+    function registerBondIssuer(address bondToken, address company) external onlyPlatformAdmin {
+        if (bondToken == address(0) || company == address(0)) revert ZeroAddress();
+        bondIssuers[bondToken] = company;
+        emit BondIssuerRegistered(bondToken, company);
+    }
+
+    /// @notice Transfer platform admin role to a new address.
+    function transferPlatformAdmin(address newAdmin) external onlyPlatformAdmin {
+        if (newAdmin == address(0)) revert ZeroAddress();
+        emit PlatformAdminTransferred(platformAdmin, newAdmin);
+        platformAdmin = newAdmin;
+    }
+
+    // =========================================================================
+    // Global Pause (platform admin only)
+    // =========================================================================
+
+    /// @notice Pause the entire engine — no new bids, rounds, or clearing across all bonds.
+    function pause() external onlyPlatformAdmin {
+        _pause();
+    }
+
+    /// @notice Resume the entire engine.
+    function unpause() external onlyPlatformAdmin {
+        _unpause();
+    }
+
+    // =========================================================================
+    // Bond-Level Pause (bond issuer only)
+    // =========================================================================
+
+    /// @notice Pause rounds for a specific bond. Only the registered issuer can call this.
+    /// @param bondToken The bond whose rounds should be paused.
+    function pauseBond(address bondToken) external onlyBondIssuer(bondToken) {
+        bondPaused[bondToken] = true;
+        emit BondPauseChanged(bondToken, true);
+    }
+
+    /// @notice Resume rounds for a specific bond.
+    function unpauseBond(address bondToken) external onlyBondIssuer(bondToken) {
+        bondPaused[bondToken] = false;
+        emit BondPauseChanged(bondToken, false);
     }
 
     // =========================================================================
     // Round Management
     // =========================================================================
 
-    /// @notice Open a new auction round for a given bond token.
+    /// @notice Open a new auction round for a bond token.
+    /// @dev Only the registered issuer for `bondToken` can call this.
     /// @param bondToken       ERC-3643 bond token address.
     /// @param settlementToken Stablecoin address (e.g. USDC).
     /// @param bidWindow       Duration in seconds the bid window stays open.
     /// @return roundId        Identifier for the newly created round.
     function openRound(address bondToken, address settlementToken, uint256 bidWindow)
         external
-        onlyIssuer
+        onlyBondIssuer(bondToken)
         whenNotPaused
         returns (uint256 roundId)
     {
         if (bondToken == address(0) || settlementToken == address(0)) revert ZeroAddress();
+        if (bondPaused[bondToken]) revert BondRoundsPaused(bondToken);
 
         roundId = nextRoundId++;
         rounds[roundId] = AuctionRound({
@@ -192,9 +284,9 @@ contract AuctionEngine is ReentrancyGuard, Pausable {
     }
 
     /// @notice Grant or revoke privileged bid-relay rights (e.g. to the clearing hook).
-    /// @param relayer The contract allowed to relay bids on behalf of traders.
+    /// @param relayer    The contract allowed to relay bids on behalf of traders.
     /// @param authorized True to allow, false to revoke.
-    function setAuthorizedBidRelayer(address relayer, bool authorized) external onlyIssuer {
+    function setAuthorizedBidRelayer(address relayer, bool authorized) external onlyPlatformAdmin {
         if (relayer == address(0)) revert ZeroAddress();
         authorizedBidRelayers[relayer] = authorized;
         emit BidRelayerUpdated(relayer, authorized);
@@ -207,6 +299,7 @@ contract AuctionEngine is ReentrancyGuard, Pausable {
 
         if (round.phase != Phase.Open) revert RoundNotOpen(roundId);
         if (block.timestamp > round.openDeadline) revert BidWindowClosed(roundId);
+        if (bondPaused[round.bondToken]) revert BondRoundsPaused(round.bondToken);
         if (price == 0) revert InvalidBidPrice();
         if (quantity == 0) revert InvalidBidQuantity();
 
@@ -235,17 +328,21 @@ contract AuctionEngine is ReentrancyGuard, Pausable {
 
     /// @notice Close the bid window and compute the clearing price.
     /// @dev Can be called by anyone once the window has passed (permissionless clearing).
-    ///      Issuer can also force-close early if needed.
+    ///      The registered issuer for the bond can also force-close early.
     function closeAndClear(uint256 roundId) external whenNotPaused nonReentrant {
         AuctionRound storage round = rounds[roundId];
 
         if (round.phase != Phase.Open) revert RoundNotOpen(roundId);
-        // Issuer can close early; otherwise must wait for deadline
-        if (msg.sender != issuer && block.timestamp <= round.openDeadline) {
+
+        // Registered issuer can close early; otherwise must wait for deadline
+        bool callerIsIssuer = (msg.sender == bondIssuers[round.bondToken]);
+        if (!callerIsIssuer && block.timestamp <= round.openDeadline) {
             revert RoundStillOpen(roundId);
         }
 
-        ClearingLib.Bid[] memory bids = _roundBids[roundId];
+        // Eligibility affects price discovery as well as delivery. Computing a
+        // price from subsequently excluded orders reports non-executable volume.
+        ClearingLib.Bid[] memory bids = _eligibleBids(round, _roundBids[roundId]);
         ClearingLib.ClearingResult memory result = ClearingLib.computeClearingPrice(bids);
 
         if (!result.hasCrossing) {
@@ -279,19 +376,18 @@ contract AuctionEngine is ReentrancyGuard, Pausable {
     {
         AuctionRound storage round = rounds[roundId];
 
-        // Reduce to the eligible bid set (drop revoked bidders), then match for a
-        // balanced fill where total buy quantity == total sell quantity.
-        ClearingLib.Bid[] memory filledBids = _matchEligibleBids(round, allBids, clearingPrice);
+        // The same eligible set determines both the price and the actual fills.
+        ClearingLib.Bid[] memory filledBids = ClearingLib.matchBids(allBids, clearingPrice);
 
         IERC20 bondToken = IERC20(round.bondToken);
         IERC20 settlementToken = IERC20(round.settlementToken);
+        uint256[] memory payments = _settlementPayments(filledBids, clearingPrice);
 
         // Collect phase: pull both legs into the engine.
         for (uint256 i = 0; i < filledBids.length; i++) {
             ClearingLib.Bid memory bid = filledBids[i];
-            uint256 settlementAmount = bid.quantity * clearingPrice / 1e18;
             if (bid.isBuy) {
-                settlementToken.safeTransferFrom(bid.bidder, address(this), settlementAmount);
+                settlementToken.safeTransferFrom(bid.bidder, address(this), payments[i]);
             } else {
                 bondToken.safeTransferFrom(bid.bidder, address(this), bid.quantity);
             }
@@ -300,11 +396,10 @@ contract AuctionEngine is ReentrancyGuard, Pausable {
         // Distribute phase: deliver both legs out of the engine.
         for (uint256 i = 0; i < filledBids.length; i++) {
             ClearingLib.Bid memory bid = filledBids[i];
-            uint256 settlementAmount = bid.quantity * clearingPrice / 1e18;
             if (bid.isBuy) {
                 bondToken.safeTransfer(bid.bidder, bid.quantity);
             } else {
-                settlementToken.safeTransfer(bid.bidder, settlementAmount);
+                settlementToken.safeTransfer(bid.bidder, payments[i]);
             }
 
             emit Settled(roundId, bid.bidder, bid.quantity, clearingPrice, bid.isBuy);
@@ -313,14 +408,41 @@ contract AuctionEngine is ReentrancyGuard, Pausable {
         round.phase = Phase.Closed;
     }
 
-    /// @dev Filters `allBids` to only KYC-eligible bidders, then matches the subset.
-    ///      Matching on the eligible subset guarantees the buy and sell fill totals are
-    ///      equal, so the collect/distribute phases always settle to zero net balance.
-    function _matchEligibleBids(
+    /// @dev Difference consecutive cumulative-floor quotes on each side. Since
+    ///      matched buy and sell quantities are equal, both cash totals equal
+    ///      floor(totalQuantity * price / 1e18), even for fractional quantities.
+    ///      Each payment is either floor or ceil of that order's exact quote;
+    ///      buyers should approve ceil(quantity * limitPrice / 1e18) per order.
+    function _settlementPayments(ClearingLib.Bid[] memory bids, uint256 price)
+        internal
+        pure
+        returns (uint256[] memory payments)
+    {
+        payments = new uint256[](bids.length);
+        uint256 buyQuantity;
+        uint256 sellQuantity;
+        uint256 buyQuote;
+        uint256 sellQuote;
+        for (uint256 i; i < bids.length; i++) {
+            if (bids[i].isBuy) {
+                buyQuantity += bids[i].quantity;
+                uint256 nextQuote = Math.mulDiv(buyQuantity, price, 1e18);
+                payments[i] = nextQuote - buyQuote;
+                buyQuote = nextQuote;
+            } else {
+                sellQuantity += bids[i].quantity;
+                uint256 nextQuote = Math.mulDiv(sellQuantity, price, 1e18);
+                payments[i] = nextQuote - sellQuote;
+                sellQuote = nextQuote;
+            }
+        }
+    }
+
+    /// @dev Filters before price discovery so reported volume and delivery agree.
+    function _eligibleBids(
         AuctionRound storage round,
-        ClearingLib.Bid[] memory allBids,
-        uint256 clearingPrice
-    ) internal view returns (ClearingLib.Bid[] memory filledBids) {
+        ClearingLib.Bid[] memory allBids
+    ) internal view returns (ClearingLib.Bid[] memory eligibleBids) {
         uint256 eligibleCount = 0;
         for (uint256 i = 0; i < allBids.length; i++) {
             if (complianceGate.isEligible(allBids[i].bidder, round.bondToken)) {
@@ -328,15 +450,13 @@ contract AuctionEngine is ReentrancyGuard, Pausable {
             }
         }
 
-        ClearingLib.Bid[] memory eligibleBids = new ClearingLib.Bid[](eligibleCount);
+        eligibleBids = new ClearingLib.Bid[](eligibleCount);
         uint256 idx = 0;
         for (uint256 i = 0; i < allBids.length; i++) {
             if (complianceGate.isEligible(allBids[i].bidder, round.bondToken)) {
                 eligibleBids[idx++] = allBids[i];
             }
         }
-
-        filledBids = ClearingLib.matchBids(eligibleBids, clearingPrice);
     }
 
     // =========================================================================
@@ -351,22 +471,5 @@ contract AuctionEngine is ReentrancyGuard, Pausable {
     /// @notice Get the current phase of a round.
     function getRoundPhase(uint256 roundId) external view returns (Phase) {
         return rounds[roundId].phase;
-    }
-
-    // =========================================================================
-    // Admin
-    // =========================================================================
-
-    function pause() external onlyIssuer {
-        _pause();
-    }
-
-    function unpause() external onlyIssuer {
-        _unpause();
-    }
-
-    function transferIssuer(address newIssuer) external onlyIssuer {
-        if (newIssuer == address(0)) revert ZeroAddress();
-        issuer = newIssuer;
     }
 }

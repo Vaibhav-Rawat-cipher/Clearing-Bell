@@ -74,7 +74,7 @@ contract ClearingBellHookTestnet is IHooks {
     error BidderNotEligible(address bidder);
     error NoActiveRound(address bondToken);
     error InvalidHookData();
-    error NotIssuer();
+    error NotBondIssuer(address bondToken);
     error ZeroQuantity();
     error NotPoolManager();
 
@@ -182,7 +182,7 @@ contract ClearingBellHookTestnet is IHooks {
     // =========================================================================
 
     function afterEpochClose(uint256 roundId, address bondToken) external {
-        if (msg.sender != auctionEngine.issuer()) revert NotIssuer();
+        if (msg.sender != auctionEngine.bondIssuers(bondToken)) revert NotBondIssuer(bondToken);
         (, , , , , uint256 clearingPrice, ,) = auctionEngine.rounds(roundId);
         lastClearingPrice[bondToken] = clearingPrice;
         emit ClearingPriceUpdated(bondToken, roundId, clearingPrice);
@@ -193,7 +193,7 @@ contract ClearingBellHookTestnet is IHooks {
     // =========================================================================
 
     function setActiveRound(address bondToken, uint256 roundId) external {
-        if (msg.sender != auctionEngine.issuer()) revert NotIssuer();
+        if (msg.sender != auctionEngine.bondIssuers(bondToken)) revert NotBondIssuer(bondToken);
         activeRound[bondToken] = roundId;
     }
 

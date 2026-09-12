@@ -1,0 +1,3 @@
+# Pages remain noindex until a public production origin is configured.
+User-agent: *
+Allow: /

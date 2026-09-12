@@ -48,8 +48,8 @@ library ClearingLib {
     ///      1. Separate buys and sells.
     ///      2. Sort buys descending by price (highest willing-to-pay first).
     ///      3. Sort sells ascending by price (lowest willing-to-accept first).
-    ///      4. Walk both arrays accumulating quantities until buy price < sell price.
-    ///      5. The last price point where cumBuyQty >= cumSellQty is the clearing price.
+    ///      4. Evaluate executable demand and supply at each sell price.
+    ///      5. Choose maximum matched volume, breaking ties at the highest sell price.
     ///      6. If no crossing, return hasCrossing = false.
     ///
     /// @param bids Mixed array of buy and sell bids.
@@ -81,11 +81,12 @@ library ClearingLib {
         //   - cumSellQty(p) = sum of all sell quantities with price <= p
         //   - matchedQty(p) = min(cumBuyQty(p), cumSellQty(p))
         //
-        // The clearing price is the highest p where cumBuyQty(p) >= cumSellQty(p) AND both > 0.
-        // We advance buy and sell pointers independently.
+        // Maximize executable volume. Demand must DECREASE as the candidate
+        // price rises: a buyer whose limit is below p cannot contribute at p.
+        // Equal-volume candidates use the highest sell price deterministically.
 
-        uint256 buyPtr = 0; // next buy to include at the current sell price level
-        uint256 cumBuyQty = 0;
+        uint256 buyPtr = buys.length;
+        uint256 cumBuyQty = _totalQuantity(buys);
         uint256 cumSellQty = 0;
         uint256 lastValidClearingPrice = 0;
         uint256 lastValidClearedQty = 0;
@@ -93,10 +94,10 @@ library ClearingLib {
         for (uint256 sellPtr = 0; sellPtr < sells.length; sellPtr++) {
             uint256 candidatePrice = sells[sellPtr].price;
 
-            // Accumulate all buys willing to pay >= candidatePrice
-            while (buyPtr < buys.length && buys[buyPtr].price >= candidatePrice) {
-                cumBuyQty += buys[buyPtr].quantity;
-                buyPtr++;
+            // Remove buyers no longer willing to pay the current ask.
+            while (buyPtr > 0 && buys[buyPtr - 1].price < candidatePrice) {
+                cumBuyQty -= buys[buyPtr - 1].quantity;
+                buyPtr--;
             }
 
             // Accumulate this sell at the candidate price
@@ -108,8 +109,10 @@ library ClearingLib {
             }
 
             uint256 matchedQty = cumBuyQty < cumSellQty ? cumBuyQty : cumSellQty;
-            lastValidClearingPrice = candidatePrice;
-            lastValidClearedQty = matchedQty;
+            if (matchedQty >= lastValidClearedQty) {
+                lastValidClearingPrice = candidatePrice;
+                lastValidClearedQty = matchedQty;
+            }
         }
 
         if (lastValidClearingPrice == 0) {
@@ -123,7 +126,8 @@ library ClearingLib {
 
     /// @notice Given a clearing price, returns the subset of bids that are filled and at what quantity.
     /// @dev Buy bids with price >= clearingPrice are eligible. Sell bids with price <= clearingPrice are eligible.
-    ///      If total buy qty != total sell qty at the clearing price, the marginal tranche is pro-rata filled.
+    ///      Price priority applies first, followed by FIFO for equal prices. The
+    ///      last allocated order may be partially filled when quantities differ.
     ///
     /// @param bids          Full bid array.
     /// @param clearingPrice The computed clearing price.
@@ -145,7 +149,7 @@ library ClearingLib {
             return new Bid[](0);
         }
 
-        // Sort so marginal bids (worst prices) are handled last for pro-rata
+        // Best prices first, FIFO within each price level.
         _sortBuysDescending(eligibleBuys);
         _sortSellsAscending(eligibleSells);
 
@@ -154,7 +158,7 @@ library ClearingLib {
         uint256 matchedQty = totalBuyQty < totalSellQty ? totalBuyQty : totalSellQty;
 
         // --- Allocate filled quantities ---
-        // The constrained side is filled fully (intra-FIFO), the unconstrained side is pro-rata at the margin.
+        // The constrained side is filled fully; the other side fills in priority order.
         Bid[] memory tempFilled = new Bid[](eligibleBuys.length + eligibleSells.length);
         uint256 filledCount = 0;
 
@@ -226,7 +230,7 @@ library ClearingLib {
 
     /// @dev Allocate fills FIFO from the sorted bid array until `availableQty` is exhausted.
     ///      For the constrained side (less total qty than the other), all are filled fully.
-    ///      For the unconstrained side, the last (marginal) bid is pro-rata filled.
+    ///      For the unconstrained side, the last (marginal) bid may be partially filled.
     function _allocateFills(
         Bid[] memory sortedBids,
         uint256 availableQty,
@@ -247,7 +251,7 @@ library ClearingLib {
                 }
             }
         } else {
-            // This side has more qty than can be matched — fill FIFO, pro-rata at margin
+            // This side has more quantity than can match: fill in priority order.
             for (uint256 i = 0; i < sortedBids.length && remaining > 0; i++) {
                 Bid memory b = sortedBids[i];
                 uint256 fill = b.quantity < remaining ? b.quantity : remaining;
@@ -286,7 +290,9 @@ library ClearingLib {
                     break;
                 }
             }
-            bids[uint256(j) + 1] = key;
+            // j may be -1 when the new key belongs at the front. Add before
+            // converting to unsigned to avoid uint256 max + 1 overflow.
+            bids[uint256(j + 1)] = key;
         }
     }
 
@@ -307,7 +313,7 @@ library ClearingLib {
                     break;
                 }
             }
-            bids[uint256(j) + 1] = key;
+            bids[uint256(j + 1)] = key;
         }
     }
 }

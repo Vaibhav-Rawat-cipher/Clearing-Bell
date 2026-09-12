@@ -1,0 +1,6 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-label="Clearing Bell">
+  <rect width="64" height="64" rx="14" fill="#07070a"/>
+  <path d="M14 22h36L42 31H22z" fill="#a99aff"/>
+  <path d="M18 32h28l-6 7H24z" fill="#6654e8"/>
+  <path d="M23 40h18l-4 5H27z" fill="#f4f2ff"/>
+</svg>
