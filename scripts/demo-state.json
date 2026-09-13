@@ -1,7 +1,7 @@
 {
-  "roundId": "17",
-  "bondAddress": "0x4e667d72d2ce52edd86916f28b8f8680193ba9d5",
-  "registryAddress": "0x73ca50e563f60ddbf09db732c2145b0943ec24e4",
-  "deadline": "1789302854",
-  "openedAt": "2026-09-13T12:24:20.385Z"
+  "roundId": "19",
+  "bondAddress": "0x4E667d72d2Ce52EdD86916F28b8f8680193BA9D5",
+  "registryAddress": "0x0000000000000000000000000000000000000000",
+  "deadline": "1789306821",
+  "openedAt": "2026-09-13T13:38:40.599Z"
 }

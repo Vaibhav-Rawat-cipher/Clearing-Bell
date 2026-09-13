@@ -116,6 +116,11 @@
 .receipt-grid > div:first-child { border-right: 1px solid #34434c; }
 .receipt-grid span { color: #aebbc3; font-size: 12px; }
 .receipt-grid b { font-size: 14px; font-weight: 500; }
+.receipt-txhash { display: grid; gap: 6px; padding: 14px 0; border-bottom: 1px solid #34434c; margin-bottom: 16px; }
+.receipt-txhash-label { color: #aebbc3; font-size: 11px; text-transform: uppercase; letter-spacing: .04em; }
+.receipt-txhash a.tx-link { font-size: 13px; font-weight: 500; color: #7ec8f0; }
+.receipt-txhash .contract-address { margin-top: 3px; }
+.receipt-txhash .contract-address a, .receipt-txhash .contract-address span { color: #8aa8b8; font-size: 11px; }
 .receipt-action { width: 100%; margin-top: 25px; }
 .protocol-dialog .primary-action, .auction-confirm-dialog .primary-action { color: #17281f; background: #bef4ce; }
 .protocol-dialog .contract-address { color: #c9d9d0; }

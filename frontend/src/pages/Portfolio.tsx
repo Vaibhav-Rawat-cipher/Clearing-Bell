@@ -1,6 +1,6 @@
 import { ArrowDownLeft, ArrowRight, ArrowUpRight, ChevronDown, Download, Layers3, LoaderCircle, RefreshCw, WalletCards } from 'lucide-react'
 import { useId, useState, type MouseEvent } from 'react'
-import { AddressLink } from '../components/ui/ChainState'
+import { AddressLink, TxLink } from '../components/ui/ChainState'
 import { ViewLink } from '../components/ViewLink'
 import { useDemoSession } from '../context/DemoSessionContext'
 import { portfolioAmount, portfolioOrders, preferredHolding } from '../lib/portfolio'
@@ -63,13 +63,13 @@ function PortfolioAccount({ onNavigate }: Navigation) {
             <td><span className={`pf-side ${bid.isBuy ? 'pf-side--buy' : ''}`}>{bid.isBuy ? <ArrowDownLeft size={14} aria-hidden="true" /> : <ArrowUpRight size={14} aria-hidden="true" />}{bid.isBuy ? 'Buy' : 'Sell'}</span></td>
             <td title={`${bid.quantity} ${round.bond.symbol}`}><strong>{portfolioAmount(bid.quantity)}</strong><small>{round.bond.symbol}</small></td>
             <td title={`${bid.price} ${round.settlement.symbol}`}><strong>{portfolioAmount(bid.price)}</strong><small>{round.settlement.symbol}</small></td>
-            <td><span className="pf-order-state">{round.phase === 'clearing' ? 'Clearing' : chainTimestamp !== null && chainTimestamp >= round.deadline ? 'Awaiting close' : 'In auction'}</span></td>
+            <td><span className="pf-order-state">{chainTimestamp !== null && chainTimestamp >= round.deadline ? 'Awaiting close' : 'In auction'}</span></td>
           </tr>) : settlements.slice(0, limit).map(item => <tr key={item.id}>
             <th scope="row"><a href={`/auction?round=${item.roundId}`} onClick={event => openRound(event, item.roundId)}><b>{item.bondSymbol}</b><span>Round {item.roundId.padStart(3, '0')} <ArrowUpRight size={12} aria-hidden="true" /></span></a></th>
             <td><span className={`pf-side ${item.isBuy ? 'pf-side--buy' : ''}`}>{item.isBuy ? <ArrowDownLeft size={14} aria-hidden="true" /> : <ArrowUpRight size={14} aria-hidden="true" />}{item.isBuy ? 'Bought' : 'Sold'}</span></td>
             <td title={`${item.quantity} ${item.bondSymbol}`}><strong>{portfolioAmount(item.quantity)}</strong><small>{item.bondSymbol}</small></td>
             <td title={`${item.price} ${item.settlementSymbol}`}><strong>{portfolioAmount(item.price)}</strong><small>{item.settlementSymbol}</small></td>
-            <td><AddressLink value={item.transactionHash} transaction /><small>Block {item.blockNumber}</small></td>
+            <td><TxLink hash={item.transactionHash} label="HashScan ↗" /><small>Block {item.blockNumber}</small></td>
           </tr>)}</tbody>
         </table>
       </div> : !(activity === 'settlements' && historyError) && <div className="pf-empty-activity"><span className="pf-empty-symbol"><Layers3 size={23} aria-hidden="true" /></span><div><h3>{activity === 'orders' ? 'No open orders.' : 'No settlements yet.'}</h3><p>{activity === 'orders' ? 'Your next trade starts in the market.' : 'Matched trades will appear here after clearing.'}</p></div><ViewLink view="markets" onNavigate={onNavigate} className="pf-quiet-action">Explore markets <ArrowUpRight size={16} aria-hidden="true" /></ViewLink></div>}
