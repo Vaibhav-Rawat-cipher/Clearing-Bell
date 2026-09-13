@@ -45,10 +45,10 @@ import * as path from "path";
 
 config({ path: path.resolve(__dirname, "../.env") });
 
-// ─── Real deployed contracts on Hedera Testnet ─────────────────────────────
-const GATE_ADDRESS    = "0x59acE2042088Dc40790a456f6af24feBdbB4Dfc7" as const;
-const ENGINE_ADDRESS  = "0x663d1825f7a1eb323EB531152e23720C7f2AD7a2" as const;
-const USDC_ADDRESS    = "0x37A4ae6511f491C5a07fbf61F6cF8b292727D255" as const;
+// ─── Real deployed contracts on Hedera Testnet ─────────────────────────────────
+const GATE_ADDRESS    = (process.env.COMPLIANCE_GATE_ADDRESS || "0x2c0f8409a2bae978c7352f6b0e60184a77624901") as const;
+const ENGINE_ADDRESS  = (process.env.AUCTION_ENGINE_ADDRESS  || "0x90ab5537d8b2131519a9af560959d0a59bb69974") as const;
+const USDC_ADDRESS    = (process.env.USDC_ADDRESS            || "0x37a4ae6511f491c5a07fbf61f6cf8b292727d255") as const;
 const RPC_URL         = "https://testnet.hashio.io/api";
 
 // ─── Keys (from .env) ──────────────────────────────────────────────────────

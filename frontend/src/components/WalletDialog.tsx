@@ -16,7 +16,7 @@ function AccountGlyph({ role, label }: { role: string; label: string }) {
 
 export function WalletDialog() {
   const session = useDemoSession()
-  const { account, config, walletMode, walletChainId, identityDialogOpen, localAccounts, pendingTx, notice, error, eligibility, connectionStatus, walletError } = session
+  const { account, config, walletMode, walletChainId, identityDialogOpen, localAccounts, pendingTx, notice, error, eligibility, connectionStatus, walletError, refreshing } = session
   const [busy, setBusy] = useState<string | null>(null)
   const [localError, setLocalError] = useState<string | null>(null)
   const [accountsOpen, setAccountsOpen] = useState(false)
@@ -49,7 +49,7 @@ export function WalletDialog() {
     {account && <section className="wallet-sheet__connected" aria-label="Connected account">
       <div className="wallet-sheet__account-title"><span><i aria-hidden="true" />{walletMode === 'local' ? currentAccount?.label || 'Local test account' : 'Browser wallet'}</span><small>{walletMode === 'local' ? 'Test account' : 'Connected'}</small></div>
       <AddressLink value={account} full />
-      <div className="wallet-sheet__account-access"><span>{connectionStatus === 'loading' ? <><LoaderCircle className="wallet-sheet__spinner" aria-hidden="true" />Checking access</> : eligibility === true ? <><ShieldCheck aria-hidden="true" />Eligible for this bond</> : eligibility === false ? <><CircleAlert aria-hidden="true" />Eligibility required</> : 'Select a bond to check eligibility'}</span><button disabled={locked} onClick={session.disconnect}><LogOut aria-hidden="true" />Disconnect</button></div>
+      <div className="wallet-sheet__account-access"><span>{connectionStatus === 'loading' && refreshing ? <><LoaderCircle className="wallet-sheet__spinner" aria-hidden="true" />Checking access</> : eligibility === true ? <><ShieldCheck aria-hidden="true" />Eligible for this bond</> : eligibility === false ? <><CircleAlert aria-hidden="true" />Eligibility required</> : 'Select a bond to check eligibility'}</span><button disabled={locked} onClick={session.disconnect}><LogOut aria-hidden="true" />Disconnect</button></div>
     </section>}
 
     {wrongChain && <section className="wallet-sheet__network" role="alert"><CircleAlert aria-hidden="true" /><div><b>Switch your wallet network</b><p>Choose {config?.network} · chain {config?.chainId}. Your wallet is on chain {walletChainId}.</p><button disabled={locked} onClick={() => void run('network', session.switchNetwork)}>{busy === 'network' ? 'Requesting switch…' : 'Switch network'}<ArrowRight aria-hidden="true" /></button></div></section>}

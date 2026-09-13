@@ -24,7 +24,8 @@ export function readableError(error: unknown): string {
       return reverted.shortMessage || 'The contract rejected this request.'
     }
     if (/HTTP request failed|fetch failed|Failed to fetch|timeout|timed out|ECONNREFUSED/i.test(message)) {
-      return 'Cannot reach the configured blockchain RPC. Check that the network or local chain is running, then retry.'
+      return 'Network request timed out. Hedera testnet RPC can be slow — retrying automatically.'
+
     }
     return error.shortMessage
   }

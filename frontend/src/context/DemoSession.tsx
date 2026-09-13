@@ -49,12 +49,21 @@ export function DemoSessionProvider({ children }: { children: React.ReactNode })
   const selectedRoundId = useRef<string | null>(null)
   const refreshSequence = useRef(0)
   const receiptTimer = useRef<number | undefined>(undefined)
+  /** True while a readSnapshot call is in progress — prevents watchBlockNumber from stacking. */
+  const refreshInFlight = useRef(false)
+  /** Sliding-window cursor: the next block to scan for events. 0n = not yet initialised. */
+  const fromBlockCursor = useRef<bigint>(0n)
+  /** Accumulated settlements from all previous scans. */
+  const cachedSettlements = useRef<import('../types').Settlement[]>([])
   const client = useMemo(() => config ? publicClientFor(config) : null, [config])
   const account = connection?.account ?? null
 
-  const refresh = useCallback(async () => {
+  const refresh = useCallback(async (force = false) => {
+    // Skip if another fetch is already running, unless forced (e.g. manual retry)
+    if (refreshInFlight.current && !force) return
     if ((account?.toLowerCase() ?? null) !== (connectedAddress.current?.toLowerCase() ?? null) || selectedId !== selectedRoundId.current) return
     const sequence = ++refreshSequence.current
+    refreshInFlight.current = true
     setRefreshing(true)
     try {
       if (!config || !client) {
@@ -62,27 +71,40 @@ export function DemoSessionProvider({ children }: { children: React.ReactNode })
         if (sequence === refreshSequence.current) setConfig(deployment)
         return
       }
-      const next = await readSnapshot(client, config, account, selectedId)
+      const next = await readSnapshot(client, config, account, selectedId, fromBlockCursor.current, cachedSettlements.current)
       if (sequence !== refreshSequence.current) return
+      fromBlockCursor.current = next.nextFromBlock
+      cachedSettlements.current = next.settlements
       setSnapshot(next)
       setError(null)
       setConnectionStatus('ready')
     } catch (cause) {
       if (sequence !== refreshSequence.current) return
-      setSnapshot(null)
       setError(readableError(cause))
-      setConnectionStatus('error')
+      setConnectionStatus((prev) => prev === 'ready' ? 'ready' : 'error')
     } finally {
-      if (sequence === refreshSequence.current) setRefreshing(false)
+      if (sequence === refreshSequence.current) {
+        refreshInFlight.current = false
+        setRefreshing(false)
+      }
     }
   }, [config, client, account, selectedId])
 
   useEffect(() => {
-    const first = window.setTimeout(() => void refresh(), 0)
-    const polling = window.setInterval(() => { if (!document.hidden) void refresh() }, 15_000)
-    const invalidate = () => { refreshSequence.current++ }
-    return () => { window.clearTimeout(first); window.clearInterval(polling); invalidate() }
-  }, [refresh, refreshVersion])
+    const invalidate = () => { refreshSequence.current++; refreshInFlight.current = false }
+    // Fire immediately on mount / when config or client changes
+    const first = window.setTimeout(() => void refresh(true), 0)
+    let unwatch = () => {}
+    if (client) {
+      // Watch for new blocks — only triggers a refresh when previous one has completed
+      unwatch = client.watchBlockNumber({
+        onBlockNumber: () => { if (!document.hidden) void refresh() },
+        poll: true,
+        pollingInterval: 4_000,
+      })
+    }
+    return () => { window.clearTimeout(first); unwatch(); invalidate() }
+  }, [refresh, refreshVersion, client])
 
   useEffect(() => {
     if (!notice) return
@@ -97,6 +119,9 @@ export function DemoSessionProvider({ children }: { children: React.ReactNode })
     refreshSequence.current++
     connectedAddress.current = next?.account ?? null
     connectionRef.current = next
+    // Reset sliding window — new account needs fresh event history
+    fromBlockCursor.current = 0n
+    cachedSettlements.current = []
     setSnapshot(null)
     setConnectionStatus('loading')
     setConnection(next)
@@ -381,7 +406,7 @@ export function DemoSessionProvider({ children }: { children: React.ReactNode })
     connectWallet, switchNetwork, connectLocalAccount,
     retryWalletConnection: async () => { await walletManager.current?.restore() },
     disconnect: () => { walletManager.current?.disconnect(); setIdentityDialogOpen(false) },
-    selectRound: (id) => { if (!/^\d+$/.test(id)) return; refreshSequence.current++; selectedRoundId.current = id; setSelectedId(id); setSnapshot(null); setConnectionStatus('loading'); setRefreshVersion((version) => version + 1); setOrder(emptyOrder) },
+    selectRound: (id) => { if (!/^\d+$/.test(id)) return; refreshSequence.current++; selectedRoundId.current = id; fromBlockCursor.current = 0n; cachedSettlements.current = []; setSelectedId(id); setSnapshot(null); setConnectionStatus('loading'); setRefreshVersion((version) => version + 1); setOrder(emptyOrder) },
     refresh, approveOrder, submitOrder, closeRound, openRound, setPaused,
     openIdentityDialog: () => setIdentityDialogOpen(true), closeIdentityDialog: () => setIdentityDialogOpen(false),
     updateOrder: (patch) => setOrder((current) => ({ ...current, ...patch })), setOrderSide: (side) => setOrder((current) => ({ ...current, side })),

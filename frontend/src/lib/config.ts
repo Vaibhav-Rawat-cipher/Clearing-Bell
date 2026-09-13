@@ -83,8 +83,9 @@ export function chainFor(config: DeploymentConfig) {
 }
 
 export function publicClientFor(config: DeploymentConfig) {
-  return createPublicClient({ chain: chainFor(config), transport: http(config.rpcUrl, { timeout: 12_000, retryCount: 1 }), batch: { multicall: false } })
+  return createPublicClient({ chain: chainFor(config), transport: http(config.rpcUrl, { timeout: 30_000, retryCount: 2, retryDelay: 1_000 }), batch: { multicall: false } })
 }
+
 
 export type AuctionPublicClient = ReturnType<typeof publicClientFor>
 

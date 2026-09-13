@@ -15,9 +15,21 @@ export function AddressLink({ value, transaction = false, full = false }: { valu
   const [copied, setCopied] = useState(false)
   const [copyError, setCopyError] = useState(false)
   const explorer = config?.explorerUrl?.replace(/\/$/, '')
+  // HashScan uses /transaction/<hash> and /address/<addr>
+  const path = transaction ? 'transaction' : 'address'
   return <span className="contract-address" title={value}>
-    {explorer ? <a href={`${explorer}/${transaction ? 'tx' : 'address'}/${value}`} target="_blank" rel="noreferrer">{full ? value : shortAddress(value)}<ExternalLink size={12} /></a> : <span>{full ? value : shortAddress(value)}</span>}
+    {explorer ? <a href={`${explorer}/${path}/${value}`} target="_blank" rel="noreferrer">{full ? value : shortAddress(value)}<ExternalLink size={12} /></a> : <span>{full ? value : shortAddress(value)}</span>}
     <button aria-label={`Copy ${transaction ? 'transaction hash' : 'address'} ${shortAddress(value)}`} onClick={async () => { try { await navigator.clipboard.writeText(value); setCopied(true); setCopyError(false); setTimeout(() => setCopied(false), 1800) } catch { setCopyError(true) } }}>{copied ? <Check size={13} /> : <Copy size={13} />}</button>
     {copyError && <small role="status">Copy unavailable. Select the address to copy.</small>}
   </span>
+}
+
+/** Renders a clickable HashScan transaction link */
+export function TxLink({ hash, label }: { hash: string; label?: string }) {
+  const { config } = useDemoSession()
+  const explorer = config?.explorerUrl?.replace(/\/$/, '')
+  const short = `${hash.slice(0, 8)}…${hash.slice(-6)}`
+  return explorer
+    ? <a className="tx-link" href={`${explorer}/transaction/${hash}`} target="_blank" rel="noreferrer">{label ?? short}<ExternalLink size={11} /></a>
+    : <code className="tx-link">{label ?? short}</code>
 }
